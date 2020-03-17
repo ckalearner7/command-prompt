@@ -1,0 +1,247 @@
+###############
+#Networking#
+###############
+
+# Основной компонент - flannel
+# Flannel runs a small, single binary agent called flanneld on each host
+
+#Таблица маршрутизации мастера
+[cloud_user@fas3c ~]$ ip route
+default via 172.31.16.1 dev ens5 proto dhcp metric 100						#Маршрут по умолчанию для всего EC2
+10.244.0.0/24 dev cni0 proto kernel scope link src 10.244.0.1				#Адрес сети самого мастера
+10.244.1.0/24 via 10.244.1.0 dev flannel.1 onlink 							#Адрес сети подключенной ноды
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1			#Адрес сети для Docker. Все контейнеры будут в этой подсети
+172.31.16.0/20 dev ens5 proto kernel scope link src 172.31.18.58 metric 100
+
+#Сетевые порты мастера
+[cloud_user@fas3c ~]$ ifconfig
+cni0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet 10.244.0.1  netmask 255.255.255.0  broadcast 0.0.0.0
+
+docker0: flags=4099<UP,BROADCAST,MULTICAST>  mtu 1500
+        inet 172.17.0.1  netmask 255.255.0.0  broadcast 172.17.255.255
+
+ens5: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 9001			#Private IP
+        inet 172.31.18.58  netmask 255.255.240.0  broadcast 172.31.31.255
+
+flannel.1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet 10.244.0.0  netmask 255.255.255.255  broadcast 0.0.0.0
+
+[cloud_user@fas3c ~]$ ps -ef | grep [f]lannel # Агент flannel
+root      5403  5374  0 05:32 ?        00:00:01 /opt/bin/flanneld --ip-masq --kube-subnet-mgr 
+
+#Таблица маршрутизации ноды
+[cloud_user@fas4c ~]$ ip route
+default via 172.31.16.1 dev ens5 proto dhcp metric 100
+10.244.0.0/24 via 10.244.0.0 dev flannel.1 onlink
+10.244.1.0/24 dev cni0 proto kernel scope link src 10.244.1.1
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+172.31.16.0/20 dev ens5 proto kernel scope link src 172.31.31.208 metric 100
+
+#Сетевые порты ноды
+[cloud_user@fas4c ~]$ ifconfig
+cni0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet 10.244.1.1  netmask 255.255.255.0  broadcast 0.0.0.0
+
+docker0: flags=4099<UP,BROADCAST,MULTICAST>  mtu 1500
+        inet 172.17.0.1  netmask 255.255.0.0  broadcast 172.17.255.255
+
+ens5: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 9001
+        inet 172.31.31.208  netmask 255.255.240.0  broadcast 172.31.31.255
+
+flannel.1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet 10.244.1.0  netmask 255.255.255.255  broadcast 0.0.0.0
+
+[cloud_user@fas3c ~]$ kubectl get pods --all-namespaces -o wide # IP-адреса pods
+NAMESPACE     NAME                                                   READY   STATUS    RESTARTS   AGE     IP              NODE                           NOMINATED NODE   READINESS GATES
+kube-system   coredns-6955765f44-2bbj2                               1/1     Running   4          3d22h   10.244.0.11     fas3c.mylabserver.com   <none>           <none>
+kube-system   coredns-6955765f44-5jjq9                               1/1     Running   4          3d22h   10.244.0.10     fas3c.mylabserver.com   <none>           <none>
+kube-system   etcd-fas3c.mylabserver.com                      1/1     Running   4          3d22h   172.31.18.58    fas3c.mylabserver.com   <none>           <none>
+kube-system   kube-apiserver-fas3c.mylabserver.com            1/1     Running   4          3d22h   172.31.18.58    fas3c.mylabserver.com   <none>           <none>
+kube-system   kube-controller-manager-fas3c.mylabserver.com   1/1     Running   4          3d22h   172.31.18.58    fas3c.mylabserver.com   <none>           <none>
+kube-system   kube-flannel-ds-amd64-5qggn                            1/1     Running   4          3d22h   172.31.18.58    fas3c.mylabserver.com   <none>           <none>
+kube-system   kube-flannel-ds-amd64-r4qrd                            1/1     Running   5          3d22h   172.31.31.208   fas4c.mylabserver.com   <none>           <none>
+kube-system   kube-proxy-6wx74                                       1/1     Running   4          3d22h   172.31.18.58    fas3c.mylabserver.com   <none>           <none>
+kube-system   kube-proxy-n6dqd                                       1/1     Running   4          3d22h   172.31.31.208   fas4c.mylabserver.com   <none>           <none>
+kube-system   kube-scheduler-fas3c.mylabserver.com            1/1     Running   4          3d22h   172.31.18.58    fas3c.mylabserver.com   <none>           <none>
+podexample    examplepod                                             2/2     Running   2          22h     10.244.1.4      fas4c.mylabserver.com   <none>           <none>
+
+# Важно, что после перезагрузки IP-адрес pod - examplepod изменился => он динамический
+# DNS pods используют адресное пространство flannel
+
+###############
+#DNS#
+###############
+[cloud_user@fas3c ~]$ kubectl get pods --all-namespaces
+NAMESPACE     NAME                                                   READY   STATUS    RESTARTS   AGE
+kube-system   coredns-6955765f44-2bbj2                               1/1     Running   4          3d23h
+kube-system   coredns-6955765f44-5jjq9                               1/1     Running   4          3d23h
+kube-system   etcd-fas3c.mylabserver.com                      1/1     Running   4          3d23h
+kube-system   kube-apiserver-fas3c.mylabserver.com            1/1     Running   4          3d23h
+kube-system   kube-controller-manager-fas3c.mylabserver.com   1/1     Running   4          3d23h
+kube-system   kube-flannel-ds-amd64-5qggn                            1/1     Running   4          3d22h
+kube-system   kube-flannel-ds-amd64-r4qrd                            1/1     Running   5          3d22h
+kube-system   kube-proxy-6wx74                                       1/1     Running   4          3d23h
+kube-system   kube-proxy-n6dqd                                       1/1     Running   4          3d22h
+kube-system   kube-scheduler-fas3c.mylabserver.com            1/1     Running   4          3d23h
+podexample    examplepod                                             2/2     Running   2          23h
+
+[cloud_user@fas3c ~]$ kubectl exec -it examplepod /bin/bash -n podexample
+Defaulting container name to webcontainer. # Попадаем в контейнер по умолчанию
+Use 'kubectl describe pod/examplepod -n podexample' to see all of the containers in this pod.
+root@examplepod:/# cat /etc/resolv.conf
+nameserver 10.96.0.10 # подсеть, где живет сервис kukubernetes c адресом 10.96.0.1 (см. далее)
+search podexample.svc.cluster.local svc.cluster.local cluster.local us-west-2.compute.internal mylabserver.com
+options ndots:5
+
+###############
+#ReplicaSets#
+###############
+
+#Настройки ReplicaSets
+[cloud_user@fas3c ~]$ vi ./replicas-example.yaml
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: frontend # название ReplicaSet
+  labels: #Список labels
+    app: nginx
+    tier: frontend
+spec:
+  replicas: 2 # Количество копий
+  selector:
+    matchLabels: # Условие, которому должны удовлетворять объекты ReplicaSet
+      tier: frontend
+    matchExpressions:
+      - {key: tier, operator: In, values: [frontend]}
+  template:
+    metadata: #Информация, которая будет у pods
+      labels:
+        app: nginx
+        tier: frontend
+    spec:
+      containers: # Настройки контейнеров в pod
+      - name: nginx
+        image: darealmc/nginx-k8s:v1
+        ports:
+        - containerPort: 80
+		
+[cloud_user@fas3c ~]$ kubectl create -f ./replicas-example.yaml # Создание ReplicaSets
+replicaset.apps/frontend created
+
+[cloud_user@fas3c ~]$ kubectl get pods # Появились два pods в default namespaces
+NAME             READY   STATUS    RESTARTS   AGE
+frontend-752f7   1/1     Running   0          87s
+frontend-hzq2x   1/1     Running   0          87s
+
+[cloud_user@fas4c ~]$ sudo docker ps -f name=nginx # Также на ноде появилось два контейнера (каждый в соответствующем pod)
+[sudo] password for cloud_user:
+CONTAINER ID        IMAGE                COMMAND                  CREATED             STATUS              PORTS               NAMES
+2ef8b67e8d3c        darealmc/nginx-k8s   "nginx -g 'daemon of…"   3 minutes ago       Up 3 minutes                            k8s_nginx_frontend-752f7_default_ae492ef5-f112-40ab-9b33-da2c19d3f70e_0
+7c18b1c434a1        darealmc/nginx-k8s   "nginx -g 'daemon of…"   3 minutes ago       Up 3 minutes                            k8s_nginx_frontend-hzq2x_default_57daa263-6a97-45c6-b7bf-0de727ac48f2_0
+
+[cloud_user@fas3c ~]$ kubectl describe rs/frontend # Вывести информацию о ReplicaSet по имени
+Name:         frontend
+Namespace:    default
+Selector:     tier=frontend,tier in (frontend)
+Labels:       app=nginx
+              tier=frontend
+Annotations:  <none>
+Replicas:     2 current / 2 desired
+Pods Status:  2 Running / 0 Waiting / 0 Succeeded / 0 Failed
+Pod Template:
+  Labels:  app=nginx
+           tier=frontend
+  Containers:
+   nginx:
+    Image:        darealmc/nginx-k8s:v1
+    Port:         80/TCP
+    Host Port:    0/TCP
+    Environment:  <none>
+    Mounts:       <none>
+  Volumes:        <none>
+Events:
+  Type    Reason            Age    From                   Message
+  ----    ------            ----   ----                   -------
+  Normal  SuccessfulCreate  6m21s  replicaset-controller  Created pod: frontend-752f7
+  Normal  SuccessfulCreate  6m21s  replicaset-controller  Created pod: frontend-hzq2x
+  
+[cloud_user@fas3c ~]$ kubectl describe pod frontend-752f7 # Подробная информация о pod по имени
+Name:         frontend-752f7
+Namespace:    default
+Priority:     0
+Node:         fas4c.mylabserver.com/172.31.31.208
+Start Time:   Tue, 03 Mar 2020 09:47:00 +0000
+Labels:       app=nginx
+              tier=frontend
+Annotations:  <none>
+Status:       Running
+IP:           10.244.1.6
+IPs:
+  IP:           10.244.1.6
+Controlled By:  ReplicaSet/frontend #Какой ReplicaSet управляет pod`ом 
+Containers:
+  nginx:
+    Container ID:   docker://2ef8b67e8d3c58a9e38a542984a628bcb39bb6457e88758ec1ae2326ccc512d5
+    Image:          darealmc/nginx-k8s:v1
+    Image ID:       docker-pullable://darealmc/nginx-k8s@sha256:b2f495760dbb1557e05ef20115f26badfa9eabd34c1209484c970a33965b0c94
+    Port:           80/TCP
+    Host Port:      0/TCP
+    State:          Running
+      Started:      Tue, 03 Mar 2020 09:47:09 +0000
+    Ready:          True
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from default-token-t89xs (ro)
+Conditions:
+  Type              Status
+  Initialized       True
+  Ready             True
+  ContainersReady   True
+  PodScheduled      True
+Volumes:
+  default-token-t89xs:
+    Type:        Secret (a volume populated by a Secret)
+    SecretName:  default-token-t89xs
+    Optional:    false
+QoS Class:       BestEffort
+Node-Selectors:  <none>
+Tolerations:     node.kubernetes.io/not-ready:NoExecute for 300s
+                 node.kubernetes.io/unreachable:NoExecute for 300s
+Events:
+  Type    Reason     Age        From                                   Message
+  ----    ------     ----       ----                                   -------
+  Normal  Scheduled  <unknown>  default-scheduler                      Successfully assigned default/frontend-752f7 to fas4c.mylabserver.com
+  Normal  Pulling    9m20s      kubelet, fas4c.mylabserver.com  Pulling image "darealmc/nginx-k8s:v1"
+  Normal  Pulled     9m13s      kubelet, fas4c.mylabserver.com  Successfully pulled image "darealmc/nginx-k8s:v1"
+  Normal  Created    9m13s      kubelet, fas4c.mylabserver.com  Created container nginx
+  Normal  Started    9m13s      kubelet, fas4c.mylabserver.com  Started container nginx
+
+[cloud_user@fas4c ~]$ sudo docker container inspect 2ef8b67e8d3c # Далее можно посмотреть информацию о контейнере
+
+[cloud_user@fas3c ~]$ curl 10.244.1.6:80 # Приложение NGINX работает в контейнере
+<head>
+  <h1> This is the Correct container! Congratulations!</h1>
+</head>
+<body>
+  <img src='k8slogo.png' height="550" width="550">
+</body>
+
+[cloud_user@fas3c ~]$ kubectl scale rs/frontend --replicas=4 # Масштабирование ReplicaSet
+replicaset.apps/frontend scaled
+[cloud_user@fas3c ~]$ kubectl get pods
+NAME             READY   STATUS    RESTARTS   AGE
+frontend-752f7   1/1     Running   0          16m
+frontend-9vh5r   1/1     Running   0          8s # Новый pod
+frontend-hzq2x   1/1     Running   0          16m
+frontend-tjc67   1/1     Running   0          8s # Новый pod
+
+[cloud_user@fas3c ~]$ kubectl get rs
+NAME       DESIRED   CURRENT   READY   AGE
+frontend   4         4         4       20m
+
+[cloud_user@fas3c ~]$ kubectl delete rs/frontend # Удаление ReplicaSet
+replicaset.apps "frontend" deleted
+[cloud_user@fas3c ~]$ kubectl get rs
+No resources found in default namespace.

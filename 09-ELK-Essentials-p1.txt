@@ -1,0 +1,315 @@
+											#####Deploying and Configuring the Elastic Stack#####
+###############
+#Deploying a Multi-Node Elasticsearch Cluster#
+###############
+
+cloud_user@fas3c - ELK Master 1
+cloud_user@fas4c - ELK data 1
+cloud_user@fas5c - ELK data 2
+
+			##### ALL NODES #####
+# Шаг 1. Import the Elastic GPG key
+
+[cloud_user@fas3c ~]$ sudo -i
+[sudo] password for cloud_user:
+[root@fas3c ~]# rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+
+# Шаг 2. Download and install Elasticsearch from an RPM
+[root@fas3c ~]# curl -O https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.6.0-x86_64.rpm
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100  282M  100  282M    0     0  36.1M      0  0:00:07  0:00:07 --:--:-- 20.2M
+[root@fas3c ~]# ls
+elasticsearch-7.6.0-x86_64.rpm  links-2.13-1.el7.x86_64.rpm  swap
+
+[root@fas3c ~]# rpm --install elasticsearch-7.6.0-x86_64.rpm
+Creating elasticsearch group... OK
+Creating elasticsearch user... OK
+### NOT starting on installation, please execute the following statements to configure elasticsearch service to start automatically using systemd
+ sudo systemctl daemon-reload
+ sudo systemctl enable elasticsearch.service
+### You can start elasticsearch service by executing
+ sudo systemctl start elasticsearch.service
+Created elasticsearch keystore in /etc/elasticsearch
+
+[root@fas3c ~]#  sudo systemctl daemon-reload
+[root@fas3c ~]# sudo systemctl enable elasticsearch.service
+Created symlink from /etc/systemd/system/multi-user.target.wants/elasticsearch.service to /usr/lib/systemd/system/elasticsearch.service.
+
+[root@fas3c ~]# ls -l /etc/elasticsearch/ # Все конфигураионные файлы тут
+total 40
+-rw-rw----. 1 root elasticsearch   199 Mar 12 13:59 elasticsearch.keystore
+-rw-rw----. 1 root elasticsearch  2847 Feb  6 00:21 elasticsearch.yml
+-rw-rw----. 1 root elasticsearch  2373 Feb  6 00:21 jvm.options
+-rw-rw----. 1 root elasticsearch 17545 Feb  6 00:21 log4j2.properties
+-rw-rw----. 1 root elasticsearch   473 Feb  6 00:21 role_mapping.yml
+-rw-rw----. 1 root elasticsearch   197 Feb  6 00:21 roles.yml
+-rw-rw----. 1 root elasticsearch     0 Feb  6 00:21 users
+-rw-rw----. 1 root elasticsearch     0 Feb  6 00:21 users_roles
+
+			##### UNIGUE FOR NODES #####
+# Шаг 3. Configure Elasticsearch to form a cluster + Шаг 4. Configure Elasticsearch to listen on multiple addresses
+###Master-1###
+[root@fas3c ~]# vim /etc/elasticsearch/elasticsearch.yml
+# Раскомментировать и изменить:
+cluster.name: playground
+node.name: master-1 # Название уникальное для каждой ноды
+network.host: [_local_, _site_ ]
+discovery.seed_hosts: ["172.31.29.149"] # Адрес Master
+cluster.initial_master_nodes: ["master-1"] # Имя Master
+#Добавить
+node.master: true
+node.data: false
+node.ingest: true
+node.ml: false # Machine Learning
+
+[root@fas3c ~]# vim /etc/elasticsearch/jvm.options
+# Настройка Heap. Если будет выделено оченть много памяти для ELK на сервере, то служба ELK не запустится. Зависит от ресурсов сервера
+-Xms108m 
+-Xmx108m
+
+###Data-1###
+[root@fas4c ~]# vim /etc/elasticsearch/elasticsearch.yml
+# Раскомментировать и изменить:
+cluster.name: playground
+node.name: data-1 # Название уникальное для каждой ноды
+network.host: [_local_, _site_ ]
+discovery.seed_hosts: ["172.31.29.149"] # Адрес Master
+cluster.initial_master_nodes: ["master-1"] # Имя Master
+#Добавить
+node.master: false
+node.data: true
+node.ingest: true
+node.ml: false
+
+[root@fas3c ~]# vim /etc/elasticsearch/jvm.options
+# Настройка Heap. Если будет выделено оченть много памяти для ELK на сервере, то служба ELK не запустится. Зависит от ресурсов сервера
+-Xms256m 
+-Xmx256m
+
+###Data-2###
+[root@fas5c ~]# vim /etc/elasticsearch/elasticsearch.yml
+# Раскомментировать и изменить:
+cluster.name: playground
+node.name: data-2 # Название уникальное для каждой ноды
+network.host: [_local_, _site_ ]
+discovery.seed_hosts: ["172.31.29.149"] # Адрес Master
+cluster.initial_master_nodes: ["master-1"] # Имя Master
+#Добавить
+node.master: false
+node.data: true
+node.ingest: true
+node.ml: false
+
+[root@fas3c ~]# vim /etc/elasticsearch/jvm.options
+# Настройка Heap. Если будет выделено оченть много памяти для ELK на сервере, то служба ELK не запустится. Зависит от ресурсов сервера
+-Xms256m 
+-Xmx256m
+
+			##### ALL NODES #####
+# Шаг 5. Start and test an Elasticsearch cluster
+[root@fas3c ~]# systemctl start elasticsearch
+[root@fas4c ~]# systemctl start elasticsearch
+[root@fas5c ~]# systemctl start elasticsearch
+
+[root@fas3c ~]# vi /var/log/elasticsearch/playground.log # Логи можно посмотреть тут
+
+[root@fas3c ~]# curl localhost:9200 # Проверка на каждой ноде
+{
+  "name" : "master-1",
+  "cluster_name" : "playground",
+  "cluster_uuid" : "bJTO30ywSmKjATg29TKy6A",
+  "version" : {
+    "number" : "7.6.0",
+    "build_flavor" : "default",
+    "build_type" : "rpm",
+    "build_hash" : "7f634e9f44834fbc12724506cc1da681b0c3b1e3",
+    "build_date" : "2020-02-06T00:09:00.449973Z",
+    "build_snapshot" : false,
+    "lucene_version" : "8.4.0",
+    "minimum_wire_compatibility_version" : "6.8.0",
+    "minimum_index_compatibility_version" : "6.0.0-beta1"
+  },
+  "tagline" : "You Know, for Search"
+}
+
+[root@fas3c ~]# curl localhost:9200/_cat/ # Список API
+=^.^=
+/_cat/allocation
+/_cat/shards
+/_cat/shards/{index}
+/_cat/master
+/_cat/nodes
+/_cat/tasks
+/_cat/indices
+/_cat/indices/{index}
+/_cat/segments
+/_cat/segments/{index}
+/_cat/count
+/_cat/count/{index}
+/_cat/recovery
+/_cat/recovery/{index}
+/_cat/health
+/_cat/pending_tasks
+/_cat/aliases
+/_cat/aliases/{alias}
+/_cat/thread_pool
+/_cat/thread_pool/{thread_pools}
+/_cat/plugins
+/_cat/fielddata
+/_cat/fielddata/{fields}
+/_cat/nodeattrs
+/_cat/repositories
+/_cat/snapshots/{repository}
+/_cat/templates
+
+[root@fas3c ~]# curl localhost:9200/_cat/nodes # Список nodes
+172.31.31.54  32 93 1 0.16 0.11 0.15 di - data-1
+172.31.29.149 73 87 2 0.09 0.17 0.22 im * master-1
+172.31.24.219 41 93 2 0.05 0.11 0.17 di - data-2
+
+[root@fas3c ~]# curl localhost:9200/_cat/nodes?v # Подробный список nodes
+ip            heap.percent ram.percent cpu load_1m load_5m load_15m node.role master name
+172.31.31.54            42          93   0    0.04    0.08     0.14 di        -      data-1
+172.31.29.149           78          87   1    0.03    0.14     0.20 im        *      master-1
+172.31.24.219           51          93   0    0.02    0.09     0.15 di        -      data-2
+
+
+###############
+#Securing an Elasticsearch Cluster#
+###############
+# В предыдущем примере API в открытом виде
+
+[root@fas3c elasticsearch]# /usr/share/elasticsearch/bin/ # Список ELK bin-файлов
+elasticsearch                    elasticsearch-croneval           elasticsearch-migrate            elasticsearch-setup-passwords    elasticsearch-syskeygen          x-pack-watcher-env
+elasticsearch-certgen            elasticsearch-env                elasticsearch-node               elasticsearch-shard              elasticsearch-users
+elasticsearch-certutil           elasticsearch-env-from-file      elasticsearch-plugin             elasticsearch-sql-cli            x-pack-env
+elasticsearch-cli                elasticsearch-keystore           elasticsearch-saml-metadata      elasticsearch-sql-cli-7.6.0.jar  x-pack-security-env
+
+
+# Шаг 1. Generate a cluster certificate
+[root@fas3c ~]# cd /etc/elasticsearch/
+[root@fas3c elasticsearch]# mkdir certs
+[root@fas3c elasticsearch]# /usr/share/elasticsearch/bin/elasticsearch-certutil cert --name playground --out /etc/elasticsearch/certs/playground # сгенерировать сертификат
+[root@fas3c elasticsearch]# ls certs/
+playground
+
+# Скопировать сертификат по всем нодам
+[root@fas3c elasticsearch]# cp certs/playground /tmp/
+[root@fas3c elasticsearch]# ls /tmp/ | grep play
+playground
+[root@fas3c elasticsearch]# cd /tmp/
+[root@fas3c tmp]# chown cloud_user:cloud_user playground
+[root@fas3c tmp]# exit
+logout
+[cloud_user@fas3c ~]$ cd /tmp/
+[cloud_user@fas3c tmp]$ scp playground 172.31.31.54/tmp
+[cloud_user@fas3c tmp]$ scp playground 172.31.24.219:/tmp
+
+[cloud_user@fas3c tmp]$ sudo -i
+[sudo] password for cloud_user:
+[root@fas3c ~]# rm /tmp/playground
+rm: remove regular file ‘/tmp/playground’? y
+
+[root@fas4c elasticsearch]# cp /tmp/playground /etc/elasticsearch/certs/
+[root@fas5c elasticsearch]# cp /tmp/playground /etc/elasticsearch/certs/
+
+[root@fas5c elasticsearch]# ls -l /etc/elasticsearch/certs/
+total 4
+-rw-------. 1 root elasticsearch 3455 Mar 16 09:17 playground # Надо изменить права доступа у сертификата
+
+[root@fas3c ~]# cd /etc/elasticsearch/certs/
+[root@fas3c certs]# ll
+total 4
+-rw-------. 1 root elasticsearch 3455 Mar 16 09:07 playground
+[root@fas3c certs]# chmod 640 playground
+[root@fas3c certs]# ll
+total 4
+-rw-r-----. 1 root elasticsearch 3455 Mar 16 09:07 playground
+
+[root@fas4c elasticsearch]# cd /etc/elasticsearch/certs/
+[root@fas4c certs]# chmod 640 playground
+
+[root@fas5c elasticsearch]# cd /etc/elasticsearch/certs/
+[root@fas5c certs]# chmod 640 playground
+
+
+# Шаг 2. Configure the Elasticsearch Security plugin
+# Выполнить на всех узлах кластера:
+[root@fas3c certs]# cd ..
+[root@fas3c elasticsearch]# vim elasticsearch.yml
+# Добавить
+#
+# ---------------------------------- Security -----------------------------------
+#
+xpack.security.enabled: true
+xpack.security.transport.ssl.enabled: true
+xpack.security.transport.ssl.verification_mode: certificate
+xpack.security.transport.ssl.keystore.path: certs/playground
+xpack.security.transport.ssl.truststore.path: certs/playground
+
+[root@fas3c elasticsearch]# systemctl restart elasticsearch # Перезапсуть ELK на каждой ноде
+[root@fas3c elasticsearch]# systemctl status elasticsearch
+
+# Шаг 3. Enable transport network encryption + Шаг 4. Enable user authentication + Шаг 5. Set built-in user passwords
+# На предыдущем шаге кластер стал защищенным. Пользователя для доступа не нужно создавать на всех узлах кластера, достаночно на мастере:
+[root@fas3c ~]# /usr/share/elasticsearch/bin/elasticsearch-setup-passwords interactive
+Initiating the setup of passwords for reserved users elastic,apm_system,kibana,logstash_system,beats_system,remote_monitoring_user.
+You will be prompted to enter passwords as the process progresses.
+Please confirm that you would like to continue [y/N]y
+
+
+Enter password for [elastic]:
+Reenter password for [elastic]:
+Enter password for [apm_system]:
+Reenter password for [apm_system]:
+Enter password for [kibana]:
+Reenter password for [kibana]:
+Enter password for [logstash_system]:
+Reenter password for [logstash_system]:
+Enter password for [beats_system]:
+Reenter password for [beats_system]:
+Enter password for [remote_monitoring_user]:
+Reenter password for [remote_monitoring_user]:
+
+# Шаг 6. Interact with a secure Elasticsearch cluster
+[root@fas3c ~]# curl localhost:9200/_cat/nodes?v -u elastic # Проверка с пользователем
+Enter host password for user 'elastic':
+ip            heap.percent ram.percent cpu load_1m load_5m load_15m node.role master name
+172.31.29.149           88          92   2    0.09    0.14     0.16 im        *      master-1
+172.31.31.54            53          93   1    0.00    0.04     0.11 di        -      data-1
+172.31.24.219           52          93   1    0.00    0.05     0.13 di        -      data-2
+
+[cloud_user@fas4c ~]$ curl 172.31.29.149:9200/_cat/nodes?v -u elastic # Проверка с удаленного хоста попасть на мастер с его локальным пользователем
+Enter host password for user 'elastic':
+ip            heap.percent ram.percent cpu load_1m load_5m load_15m node.role master name
+172.31.31.54            35          92   1    0.08    0.08     0.13 di        -      data-1
+172.31.29.149           60          92   2    0.07    0.12     0.14 im        *      master-1
+172.31.24.219           35          93   1    0.23    0.21     0.24 di        -      data-2
+
+
+###############
+#Installing and Connecting Kibana to an Elasticsearch Cluster#
+###############
+# Шаг 1. Download and deploy Kibana
+[root@fas3c ~]$ curl -O https://artifacts.elastic.co/downloads/kibana/kibana-7.6.0-x86_64.rpm
+[root@fas3c ~]# rpm --install kibana-7.6.0-x86_64.rpm
+
+# Шаг 2. Configure Kibana to listen on a specific port and address + # Шаг 3. Configure Kibana to connect to a secured Elasticsearch cluster
+[root@fas3c ~]# vi /etc/kibana/kibana.yml
+# Раскомментировать и изменить:
+server.port: 8080
+server.host: "172.31.29.149" # Private IP Мастера
+elasticsearch.username: "kibana" 
+elasticsearch.password: "password123" # Так как мы сделали защищенный кластер, то сюда нужно ввести актуальный пароль пользователя
+
+# Шаг 4. Start and navigate to Kibana
+[root@fas3c ~]# systemctl enable kibana
+Created symlink from /etc/systemd/system/multi-user.target.wants/kibana.service to /etc/systemd/system/kibana.service.
+[root@fas3c ~]# systemctl start kibana
+[root@fas3c ~]# systemctl status kibana
+
+[root@fas3c ~]# vi /var/log/messages # Логи Kibana тут
+
+Kibana доступна по Public IP мастера http://44.234.32.54:8080/
+Использовать логин - elastic и соответстующий пароль (это пользователь, пароль для которого мы задавали при создании защищенного кластера)

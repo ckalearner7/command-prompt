@@ -1,0 +1,51 @@
+###############
+#GIT#
+###############
+fas@fas-Ubuntu:~$ sudo apt-get install git
+fas@fas-Ubuntu:~$ git --version
+fas@fas-Ubuntu:~$ git config --global user.name "FAS"
+fas@fas-Ubuntu:~$ git config --global user.email "fas@fas.com"
+fas@fas-Ubuntu:~$ git config -l
+
+######Пример: Работа с GitHub#####
+#Новый проект#
+fas@fas-Ubuntu:~/fas/from-git/New$ git init . # Создание служебных файлов (только на этапе заведения нового репозитория, при клоне не нужно)
+#Клонирование#
+fas@fas-Ubuntu:~/fas/from-git$ git clone git@github.com:fas/my-structure.git # склонировать все ветки
+fas@fas-Ubuntu:~/fas/from-git$ cd my-structure/
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git branch -a # посмотреть все доступные ветки (git branch будет виден только master)
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git checkout fas-jenkins-job01 # поменять ветку
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git checkout -b fix/become-credential # создать локальную ветку и там менять код 
+#Подготовка изменений#
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git ls-tree master # посмотреть содержимое ветки
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git branch # посмотреть ветки (для проверки)
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git branch -v # посмотреть последний коммит в каждой ветке (для проверки)
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git status # посмтреть, что изменили
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git add . # добавить изменения
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git status # проверка, что изменения добавились в локальную ветку
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git commit -m "delete become credentials" # комментарий к изменениям
+#Отправка изменений#
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git remote -v # просмотр списка удаленных репозиториев
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git push # отправить изменения
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git push --set-upstream origin fix/become-credential # генерируется автоматически | origin - это псевдоним удаленного репозитория, может быть другим
+#Сравнение содержимого#
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git remote -v # просмотр списка удаленных репозиториев
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git checkout master + git fetch # извлекает все наработки, отправленные (push) на этот сервер после того, как вы склонировали его (или получили изменения с помощью fetch). Важно отметить, что команда fetch забирает данные в ваш локальный репозиторий, но не сливает их с какими-либо вашими наработками и не модифицирует то, над чем вы работаете в данный момент. Вам необходимо вручную слить эти данные с вашими, когда вы будете готовы.
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git reset --hard origin/master # откат на последнее изменение без возможности вернуться обратно
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git diff origin/fix/become-credential # сравнить текущие файлы с файлами в удаленном репозитории origin в ветке fix/become-credential
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git pull # извлекает и затем сливает данные из удалённой ветки в вашу текущую ветку
+#Проверка соединения#
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ ssh git@github.com -T
+#Логирование#
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git log # подробный лог коммитов
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git log --oneline # читабельный лог коммитов
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git log -n 3 --oneline # логирование с указанием количества коммитов
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git log --grep="add" --oneline # логирование с поиском по слову
+#Удаление файлов#
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git rm --cached test.txt # удаление файла из stage 
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git rm test.txt + git commit -m "deleted: test.txt file" # удаление из локального репозитория
+#Удаление коммита#
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git checkout -- test.txt # для того, чтобы вернуться к предыдущей версии (последней отправленной в репозиторий). Таким образом, в вашу рабочую директорию будет скопирован файл из репозитория с заменой. Ключ “--” означает, что нас интересует файл в текущем бранче (ветке)
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git add test.txt + git commit --amend -m "third commit" # Отправим изменения в репозиторий с заметой последнего коммита
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git revert cffc5ad # удаление коммита по номеру | будет создан новый коммит с содержанием коммита до cffc5ad
+fas@fas-Ubuntu:~/fas/from-git/my-structure$ git branch master + git reset --hard 86f1495 # переключение на ветку и откат на последнее изменение без возможности вернуться обратно

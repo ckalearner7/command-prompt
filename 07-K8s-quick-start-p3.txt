@@ -1,0 +1,273 @@
+###############
+#Services#
+###############
+[cloud_user@fas3c ~]$ kubectl get pods
+No resources found in default namespace.
+
+# Выполняем запрос ReplicaSet из предыдущего примера
+[cloud_user@fas3c ~]$ kubectl create -f ./replicas-example.yaml
+replicaset.apps/frontend created
+
+# Проверка - создано два пода
+[cloud_user@fas3c ~]$ kubectl get pods
+NAME             READY   STATUS    RESTARTS   AGE
+frontend-62k98   1/1     Running   0          6s
+frontend-nswlz   1/1     Running   0          6s
+
+# Вывод информации о labels пода
+[cloud_user@fas3c ~]$ kubectl describe pod frontend-62k98 | grep Labels 
+Labels:       app=nginx
+
+# Конфигурационный файл для создания сервиса
+[cloud_user@fas3c ~]$ vi ./service-example.yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: my-awesome-service
+spec:
+  selector:
+    app: nginx # Выбирать поды с этим лэйблом
+  ports:
+  - protocol: TCP
+    port: 32768 # со стороны сервиса
+    targetPort: 80 # со стороны контейнера (ReplicaSet)
+	
+# Создание сервиса
+[cloud_user@fas3c ~]$ kubectl create -f ./service-example.yaml
+service/my-awesome-service created
+
+# Проверка
+[cloud_user@fas3c ~]$ kubectl describe service my-awesome-service
+Name:              my-awesome-service
+Namespace:         default
+Labels:            <none>
+Annotations:       <none>
+Selector:          app=nginx
+Type:              ClusterIP
+IP:                10.102.50.138 # Статический IP-адрес | откуда берется?
+Port:              <unset>  32768/TCP
+TargetPort:        80/TCP
+Endpoints:         10.244.1.10:80,10.244.1.9:80 # Контейнеры в подах, запущенные на worker-ноде | у нод 
+Session Affinity:  None
+Events:            <none>
+
+[cloud_user@fas3c ~]$ ip route
+default via 172.31.16.1 dev ens5 proto dhcp metric 100
+10.244.0.0/24 dev cni0 proto kernel scope link src 10.244.0.1
+10.244.1.0/24 via 10.244.1.0 dev flannel.1 onlink
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+172.31.16.0/20 dev ens5 proto kernel scope link src 172.31.18.58 metric 100
+
+# В итоге получается цепочка: контейнер (на нодах) - под (на нодах) - ReplicaSet (в мастере) - Сервис (в мастере)
+[cloud_user@fas3c ~]$ kubectl get pods -o wide
+NAME             READY   STATUS    RESTARTS   AGE   IP            NODE                           NOMINATED NODE   READINESS GATES
+frontend-62k98   1/1     Running   0          31m   10.244.1.9    fas4c.mylabserver.com   <none>           <none>
+frontend-nswlz   1/1     Running   0          31m   10.244.1.10   fas4c.mylabserver.com   <none>           <none>
+[cloud_user@fas3c ~]$ kubectl get rs -o wide
+NAME       DESIRED   CURRENT   READY   AGE   CONTAINERS   IMAGES                  SELECTOR
+frontend   2         2         2       31m   nginx        darealmc/nginx-k8s:v1   tier=frontend,tier in (frontend)
+[cloud_user@fas3c ~]$ kubectl get services -o wide
+NAME                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)     AGE    SELECTOR
+kubernetes           ClusterIP   10.96.0.1       <none>        443/TCP     4d5h   <none>
+my-awesome-service   ClusterIP   10.102.50.138   <none>        32768/TCP   18m    app=nginx
+
+# Проверка доступности сервиса
+[cloud_user@fas3c ~]$ curl 10.102.50.138:32768
+
+###############
+#Deployments#
+###############
+#Deployment нужен для администрирования ReplicaSet
+
+# Настройка Deployments
+[cloud_user@fas3c ~]$ vi ./deployexample.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-deployment # Имя Deployment
+  labels: 
+    app: nginx # Для Deployment
+spec:
+  replicas: 2 # Настройка ReplicaSet
+  selector:
+    matchLabels: # Условие для ReplicaSet
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx 
+    spec: 
+      containers:
+      - name: nginx
+        image: darealmc/nginx-k8s:v1
+        ports:
+        - containerPort: 80
+
+# Создание deployment		
+[cloud_user@fas3c ~]$ kubectl create -f ./deployexample.yaml
+deployment.apps/example-deployment created
+
+#Важно заметить, что до создания deployment поды были в ReplicaSet frontend а стали в example-deployment
+# До
+[cloud_user@fas3c ~]$ kubectl get pods -o wide
+NAME             READY   STATUS    RESTARTS   AGE   IP            NODE                           NOMINATED NODE   READINESS GATES
+frontend-62k98   1/1     Running   0          31m   10.244.1.9    fas4c.mylabserver.com   <none>           <none>
+frontend-nswlz   1/1     Running   0          31m   10.244.1.10   fas4c.mylabserver.com   <none>           <none>
+[cloud_user@fas3c ~]$ kubectl get rs -o wide
+NAME       DESIRED   CURRENT   READY   AGE   CONTAINERS   IMAGES                  SELECTOR
+frontend   2         2         2       31m   nginx        darealmc/nginx-k8s:v1   tier=frontend,tier in (frontend)
+
+# После
+[cloud_user@fas3c ~]$ kubectl get pods -o wide
+NAME                                  READY   STATUS    RESTARTS   AGE     IP            NODE                           NOMINATED NODE   READINESS GATES
+example-deployment-7f4577978b-6q8zb   1/1     Running   0          5m54s   10.244.1.11   fas4c.mylabserver.com   <none>           <none>
+example-deployment-7f4577978b-znb4n   1/1     Running   0          5m52s   10.244.1.12   fas4c.mylabserver.com   <none>           <none>
+[cloud_user@fas3c ~]$ kubectl get rs -o wide
+NAME                            DESIRED   CURRENT   READY   AGE     CONTAINERS   IMAGES                  SELECTOR
+example-deployment-7f4577978b   2         2         2       6m11s   nginx        darealmc/nginx-k8s:v1   app=nginx,pod-template-hash=7f4577978b
+frontend                        0         0         0       127m    nginx        darealmc/nginx-k8s:v1   tier=frontend,tier in (frontend)
+
+# Сервис не нужно создавать опять - он уже создан
+[cloud_user@fas3c ~]$ kubectl create -f service-example.yaml
+Error from server (AlreadyExists): error when creating "service-example.yaml": services "my-awesome-service" already exists
+
+[cloud_user@fas3c ~]$ kubectl describe service my-awesome-service
+Name:              my-awesome-service
+Namespace:         default
+Labels:            <none>
+Annotations:       <none>
+Selector:          app=nginx
+Type:              ClusterIP
+IP:                10.102.50.138
+Port:              <unset>  32768/TCP
+TargetPort:        80/TCP
+Endpoints:         10.244.1.11:80,10.244.1.12:80
+Session Affinity:  None
+Events:            <none>
+
+# Применение Deployment для обновление image:
+#До
+[cloud_user@fas3c ~]$ kubectl get deployment
+NAME                 READY   UP-TO-DATE   AVAILABLE   AGE
+example-deployment   2/2     2            2           29m
+#Обновление
+[cloud_user@fas3c ~]$ kubectl set image deployment.v1.apps/example-deployment nginx=darealmc/nginx-k8s:v2
+#После
+[cloud_user@fas3c ~]$ kubectl get deployment # ????????????????
+NAME                 READY   UP-TO-DATE   AVAILABLE   AGE
+example-deployment   2/2     2            2           30m
+
+[cloud_user@fas3c ~]$ kubectl get rs -o wide # Обновился ReplicaSet
+NAME                            DESIRED   CURRENT   READY   AGE     CONTAINERS   IMAGES                  SELECTOR
+example-deployment-7f4577978b   0         0         0       34m     nginx        darealmc/nginx-k8s:v1   app=nginx,pod-template-hash=7f4577978b # Старый ReplicaSet
+example-deployment-7f8879f847   2         2         2       4m15s   nginx        darealmc/nginx-k8s:v2   app=nginx,pod-template-hash=7f8879f847 # Новый ReplicaSet
+frontend                        0         0         0       155m    nginx        darealmc/nginx-k8s:v1   tier=frontend,tier in (frontend)
+
+[cloud_user@fas3c ~]$ kubectl describe deployment example-deployment | grep NewReplicaSet
+  Progressing    True    NewReplicaSetAvailable
+NewReplicaSet:   example-deployment-7f8879f847 (2/2 replicas created)
+
+###############
+#Lab 1#
+###############
+#Deployment можно создавать не через файл, а просто с указанием image. Все остальное (label, rs) появится автоматически:
+
+#Создание Deployment
+[cloud_user@k8snode2 ~]$ kubectl create deployment nginx --image=nginx
+deployment.apps/nginx created
+
+#Проверка
+[cloud_user@k8snode2 ~]$ kubectl get nodes
+NAME       STATUS   ROLES    AGE     VERSION
+k8snode1   Ready    <none>   3m38s   v1.17.3
+k8snode2   Ready    master   9m6s    v1.17.3
+
+[cloud_user@k8snode2 ~]$ kubectl get pods
+NAME                     READY   STATUS    RESTARTS   AGE
+nginx-86c57db685-npwgt   1/1     Running   0          31s
+
+[cloud_user@k8snode2 ~]$ kubectl get rs
+NAME               DESIRED   CURRENT   READY   AGE
+nginx-86c57db685   1         1         1       37s
+
+[cloud_user@k8snode2 ~]$ kubectl get service
+NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+kubernetes   ClusterIP   10.96.0.1    <none>        443/TCP   9m33s
+
+[cloud_user@k8snode2 ~]$ kubectl get deployment
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   1/1     1            1           64s
+
+[cloud_user@k8snode2 ~]$ kubectl describe rs/nginx-86c57db685
+Name:           nginx-86c57db685
+Namespace:      default
+Selector:       app=nginx,pod-template-hash=86c57db685
+Labels:         app=nginx
+                pod-template-hash=86c57db685
+Annotations:    deployment.kubernetes.io/desired-replicas: 1
+                deployment.kubernetes.io/max-replicas: 2
+                deployment.kubernetes.io/revision: 1
+Controlled By:  Deployment/nginx
+Replicas:       1 current / 1 desired
+Pods Status:    1 Running / 0 Waiting / 0 Succeeded / 0 Failed
+Pod Template:
+  Labels:  app=nginx
+           pod-template-hash=86c57db685
+  Containers:
+   nginx:
+    Image:        nginx
+    Port:         <none>
+    Host Port:    <none>
+    Environment:  <none>
+    Mounts:       <none>
+  Volumes:        <none>
+Events:
+  Type    Reason            Age   From                   Message
+  ----    ------            ----  ----                   -------
+  Normal  SuccessfulCreate  101s  replicaset-controller  Created pod: nginx-86c57db685-npwgt
+
+[cloud_user@k8snode2 ~]$ kubectl describe deployment nginx
+Name:                   nginx
+Namespace:              default
+CreationTimestamp:      Wed, 04 Mar 2020 01:04:54 -0500
+Labels:                 app=nginx
+Annotations:            deployment.kubernetes.io/revision: 1
+Selector:               app=nginx
+Replicas:               1 desired | 1 updated | 1 total | 1 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:  app=nginx
+  Containers:
+   nginx:
+    Image:        nginx
+    Port:         <none>
+    Host Port:    <none>
+    Environment:  <none>
+    Mounts:       <none>
+  Volumes:        <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Available      True    MinimumReplicasAvailable
+  Progressing    True    NewReplicaSetAvailable
+OldReplicaSets:  <none>
+NewReplicaSet:   nginx-86c57db685 (1/1 replicas created)
+Events:
+  Type    Reason             Age   From                   Message
+  ----    ------             ----  ----                   -------
+  Normal  ScalingReplicaSet  4m9s  deployment-controller  Scaled up replica set nginx-86c57db685 to 1
+
+#Масштабирование
+[cloud_user@k8snode2 ~]$ kubectl scale deployment nginx --replicas=4
+deployment.apps/nginx scaled
+
+#Проверка
+[cloud_user@k8snode2 ~]$ kubectl get pods
+NAME                     READY   STATUS    RESTARTS   AGE
+nginx-86c57db685-52khn   1/1     Running   0          8s
+nginx-86c57db685-6qhvv   1/1     Running   0          8s
+nginx-86c57db685-npwgt   1/1     Running   0          4m43s
+nginx-86c57db685-rmttq   1/1     Running   0          8s
+

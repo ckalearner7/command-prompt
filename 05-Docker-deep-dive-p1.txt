@@ -1,0 +1,1230 @@
+											#####Setting Up Your Environment#####
+###############
+#Installing Docker#
+###############
+Find in the Dicer-quick-start.txt
+
+[fas@localhost ~]$ sudo yum remove -y docker \ # Uninstall old versions
+                  docker-client \
+                  docker-client-latest \
+                  docker-common \
+                  docker-latest \
+                  docker-latest-logrotate \
+                  docker-logrotate \
+                  docker-engine
+
+											#####Learning the Basics of Docker#####
+###############
+#Installing Docker#
+###############	
+[fas@localhost ~]$ docker -h # Вывести список команд
+Options:
+      --config string      Location of client config files (default "/home/fas/.docker")
+  -c, --context string     Name of the context to use to connect to the daemon (overrides DOCKER_HOST env var and default context set with "docker context use")
+  -D, --debug              Enable debug mode
+  -H, --host list          Daemon socket(s) to connect to
+  -l, --log-level string   Set the logging level ("debug"|"info"|"warn"|"error"|"fatal") (default "info")
+      --tls                Use TLS; implied by --tlsverify
+      --tlscacert string   Trust certs signed only by this CA (default "/home/fas/.docker/ca.pem")
+      --tlscert string     Path to TLS certificate file (default "/home/fas/.docker/cert.pem")
+      --tlskey string      Path to TLS key file (default "/home/fas/.docker/key.pem")
+      --tlsverify          Use TLS and verify the remote
+  -v, --version            Print version information and quit
+  
+Management Commands:
+  builder     Manage builds
+  config      Manage Docker configs
+  container   Manage containers
+  context     Manage contexts
+  engine      Manage the docker engine
+  image       Manage images
+  network     Manage networks
+  node        Manage Swarm nodes
+  plugin      Manage plugins
+  secret      Manage Docker secrets
+  service     Manage services
+  stack       Manage Docker stacks
+  swarm       Manage Swarm
+  system      Manage Docker
+  trust       Manage trust on Docker images
+  volume      Manage volumes
+  
+ Commands:
+  attach      Attach local standard input, output, and error streams to a running container
+  build       Build an image from a Dockerfile
+  commit      Create a new image from a container's changes
+  cp          Copy files/folders between a container and the local filesystem
+  create      Create a new container
+  diff        Inspect changes to files or directories on a container's filesystem
+  events      Get real time events from the server
+  exec        Run a command in a running container
+  export      Export a container's filesystem as a tar archive
+  history     Show the history of an image
+  images      List images
+  import      Import the contents from a tarball to create a filesystem image
+  info        Display system-wide information
+  inspect     Return low-level information on Docker objects
+  kill        Kill one or more running containers
+  load        Load an image from a tar archive or STDIN
+  login       Log in to a Docker registry
+  logout      Log out from a Docker registry
+  logs        Fetch the logs of a container
+  pause       Pause all processes within one or more containers
+  port        List port mappings or a specific mapping for the container
+  ps          List containers
+  pull        Pull an image or a repository from a registry
+  push        Push an image or a repository to a registry
+  rename      Rename a container
+  restart     Restart one or more containers
+  rm          Remove one or more containers
+  rmi         Remove one or more images
+  run         Run a command in a new container
+  save        Save one or more images to a tar archive (streamed to STDOUT by default)
+  search      Search the Docker Hub for images
+  start       Start one or more stopped containers
+  stats       Display a live stream of container(s) resource usage statistics
+  stop        Stop one or more running containers
+  tag         Create a tag TARGET_IMAGE that refers to SOURCE_IMAGE
+  top         Display the running processes of a container
+  unpause     Unpause all processes within one or more containers
+  update      Update configuration of one or more containers
+  version     Show the Docker version information
+  wait        Block until one or more containers stop, then print their exit codes
+
+
+[fas@localhost ~]$ docker container run -P -d nginx
+[fas@localhost ~]$ docker ps
+[fas@localhost ~]$ docker container inspect a2c54fe5156c | grep IPAdd
+[fas@localhost ~]$ docker container inspect a2c54fe5156c | grep HostPort
+[fas@localhost ~]$ docker container top a2c54fe5156c # Показать список процессов в контейнере
+UID                 PID                 PPID                C                   STIME               TTY                 TIME                CMD
+root                2279                2262                0                   01:34               ?                   00:00:00            nginx: master process nginx -g daemon off;
+101                 2322                2279                0                   01:34               ?                   00:00:00            nginx: worker process
+[fas@localhost ~]$ docker container stop a2c54fe5156c
+[fas@localhost ~]$ docker container start a2c54fe5156c # Изменился внешний порт после перезапуска
+[fas@localhost ~]$ curl localhost:32769 # Проверка работы nginx
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+[fas@localhost ~]$ docker container logs a2c54fe5156c # Показать логи контейнера
+172.17.0.1 - - [21/Jan/2020:06:46:32 +0000] "GET / HTTP/1.1" 200 612 "-" "curl/7.29.0" "-"
+[fas@localhost ~]$ docker container stats a2c54fe5156c # Показать используемые ресурсы контейнера
+CONTAINER ID        NAME                CPU %               MEM USAGE / LIMIT   MEM %               NET I/O             BLOCK I/O           PIDS
+a2c54fe5156c        relaxed_dhawan      0.00%               41.27MiB / 991MiB   4.16%               47.9kB / 15.9kB     23.7MB / 0B         2
+[fas@localhost ~]$ docker container exec -it a2c54fe5156c /bin/bash # Выполнить команду в контейнере
+root@a2c54fe5156c:/# ls
+bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
+[fas@localhost ~]$ docker container pause a2c54fe5156c # Поставить контейнер на паузу
+a2c54fe5156c
+[fas@localhost ~]$ docker ps 
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS                   PORTS                   NAMES
+a2c54fe5156c        nginx               "nginx -g 'daemon of…"   20 minutes ago      Up 10 minutes (Paused)   0.0.0.0:32769->80/tcp   relaxed_dhawan
+[fas@localhost ~]$ docker container unpause a2c54fe5156c # Продолжить работу контейнера
+a2c54fe5156c
+[fas@localhost ~]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                   NAMES
+a2c54fe5156c        nginx               "nginx -g 'daemon of…"   22 minutes ago      Up 12 minutes       0.0.0.0:32769->80/tcp   relaxed_dhawan
+[fas@localhost ~]$ docker container rm -f a2c54fe5156c # Принудительно удалить работающий контейнер | -f = force
+[fas@localhost ~]$ docker container prune # Удалить все остановленные контейнеры на хосте
+
+###############
+#Creating Containers#
+###############	
+docker container run:
+
+--help Print usage
+--rm Automatically remove the container when it exits
+-d, --detach Run container in background and print container ID
+-i, --interactive Keep STDIN open even if not attached
+--name string Assign a name to the container
+-p, --publish list Publish a container's port(s) to the host
+-t, --tty Allocate a pseudo-TTY
+-v, --volume list Mount a volume (the bind type of mount)
+--mount mount Attach a filesystem mount to the container
+--network string Connect a container to a network (default "default")
+
+[fas@localhost ~]$ docker container run --rm busybox # Автоматически удалять контейнер при выходе из него
+
+###############
+#Exposing Container Ports#
+###############
+[fas@localhost ~]$ docker container run -d --expose 3000 nginx # -expose задействует порт 3000 для контейнера, но не открывает его наружу
+ccbde9dbcfd96148ee0275b09bb22870f62fd4ff19388d6efdb08cb8dd7ac8be
+[fas@localhost ~]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+ccbde9dbcfd9        nginx               "nginx -g 'daemon of…"   3 seconds ago       Up 2 seconds        80/tcp, 3000/tcp    nifty_carson
+
+[fas@localhost ~]$ docker container run -d --expose 3000 -p 80:3000 nginx # Задействуем порт 3000 для контейнера и маппим его на наружу через 80 порт на localhost
+8f56ad46b5cdcd4e6e090afc76d2449e663b0d107e79266613f3a14725172667
+[fas@localhost ~]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                          NAMES
+8f56ad46b5cd        nginx               "nginx -g 'daemon of…"   10 seconds ago      Up 9 seconds        80/tcp, 0.0.0.0:80->3000/tcp   eager_lichterman
+[fas@localhost ~]$ curl localhost:3000 # Не должно быть соединения
+curl: (7) Failed connect to localhost:3000; Connection refused
+[fas@localhost ~]$ curl localhost:80 # Соединение отброшено, так как в контейнере ничего нет, что может использовать 3000 порт
+curl: (56) Recv failure: Connection reset by peer
+
+[fas@localhost ~]$ docker container run -d --expose 3000 -p 8080:80 nginx # Продолжение предыдущего примера и проброс правильного порта
+9ada8a336fd9a03f79a5ecbdde5278bd822c29e42464ebefe69b395d2ec6671d
+[fas@localhost ~]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                            NAMES
+9ada8a336fd9        nginx               "nginx -g 'daemon of…"   6 seconds ago       Up 5 seconds        3000/tcp, 0.0.0.0:8080->80/tcp   magical_knuth
+[fas@localhost ~]$ curl localhost:80
+curl: (7) Failed connect to localhost:80; Connection refused
+[fas@localhost ~]$ curl localhost:8080
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+
+[fas@localhost ~]$ docker container run -d -p 8081:80/tcp -p 8081:80/udp nginx # Маппинг с разделением по портам | -p or --publish publishes a container's port(s) to the host
+[fas@localhost ~]$ curl localhost:8081
+
+fas@localhost ~]$ docker container run -d -P nginx # Маппинг с рандомным портом | -P, or --publish-all publishes all exposed ports to random ports
+
+[fas@localhost ~]$ docker container port 999622cf4028 # Показать проброшенные порты в контейнере
+80/tcp -> 0.0.0.0:8081
+80/udp -> 0.0.0.0:8081
+
+###############
+#Executing Container Commands#
+###############
+Dockerfile for NGINX https://github.com/nginxinc/docker-nginx/blob/baa050df601b5e798431a9db458e16f53b1031f6/mainline/stretch/Dockerfile
+Start a container with a command: 
+docker container run [IMAGE] [CMD]
+
+Execute a command on a container: 
+docker container exec -it [NAME] [CMD]
+
+Example:
+docker container run -d -p 8080:80 nginx
+docker container ps
+docker container exec -it [NAME] /bin/bash
+docker container exec -it [NAME] ls /usr/share/nginx/html/
+
+###############
+#Docker Logging#
+###############
+https://12factor.net/logs
+[fas@localhost ~]$ docker pull linuxacademycontent/weather-app
+[fas@localhost ~]$ docker container run --name weather-app -d -p 80:3000 linuxacademycontent/weather-app
+[fas@localhost ~]$ docker container logs 7542eb1abaf9 # Показать логи того, что происходит в контейнере
+Listening on port 3000
+GET / 200 19.148 ms - 619
+GET /stylesheets/style.css 200 5.221 ms - 1649
+GET /favicon.ico 404 6.878 ms - 771
+undefined:1
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+
+[fas@localhost ~]$ docker container run -d --name ghost_blog \ # Запустить контейнер с внешними переменными
+-e database__client=mysql \
+-e database__connection__host=mysql \
+-e database__connection__user=root \
+-e database__connection__password=P4sSw0rd0! \
+-e database__connection__database=ghost \
+-p 8080:2368 \
+ghost:1-alpine
+
+Logs need to be output to STDOUT and STDERR. # Логи нужно выводить в STDOUT и STDERR (в dockerfile)
+Nginx Example:
+RUN ln -sf /dev/stdout /var/log/nginx/access.log \
+    && ln -sf /dev/stderr /var/log/nginx/error.log
+
+											#####Networking and Storage#####
+###############
+#Networking Overview#
+###############
+
+Docker Networking:
+	Open-source pluggable architecture
+	Container Network Model (CNM)
+	libnetwork implements CNM
+	Drivers extend the network topologies
+
+Network Drivers:
+	bridge
+	host
+	overlay
+	macvlan
+	none
+	Network plugins
+	Container Network Model
+
+Defines three building blocks:
+	Sandboxes
+	Endpoints
+	Networks
+	
+###############
+#Networking Overview#
+###############
+
+Networking Basics
+	Basic:
+		ifconfig
+
+	List all Docker network commands: 
+		docker network -h
+
+	List all Docker networks on the host:
+		docker network ls
+		docker network ls --no-trunc
+
+	Getting detailed info on a network:
+		docker network inspect [NAME]
+
+	Creating a network:
+		docker network create br00
+
+	Deleting a network:
+		docker network rm [NAME]
+
+	Remove all unused networks:
+		docker network prune
+
+Adding and Removing containers to a network
+
+	Create a container with no network:
+		docker container run -d --name network-test03 -p 8081:80 nginx
+
+	Create a new network:
+		docker network create br01
+
+	Add the container to the bridge network:
+		docker network connect br01 network-test03
+
+	Inspect network-test03 to see the networks:
+		docker container inspect network-test03
+
+	Remove network-test03 from br01:
+		docker network disconnect br01 network-test03
+		
+###############
+#Networking Containers#
+###############
+[fas@localhost ~]$ docker network ls # Показать список сетей (здесь default сети)
+NETWORK ID          NAME                DRIVER              SCOPE
+860e2ed05d11        bridge              bridge              local
+f0c78b0b87d4        host                host                local
+0c6f9d1b7aca        none                null                local
+
+#Сценарий 1. Пример с созданием сети:
+[fas@localhost ~]$ docker network create --subnet 10.1.0.0/24 --gateway 10.1.0.1 br02 # Создать новую сеть типа bridge
+[fas@localhost ~]$ ifconfig # Покажет, что появился интерфейс для новой сети
+br-3a3502a8122b: flags=4099<UP,BROADCAST,MULTICAST>  mtu 1500
+        inet 10.1.0.1  netmask 255.255.255.0  broadcast 10.1.0.255
+[fas@localhost ~]$ docker network inspect br02 # Показать информацию о сети
+[fas@localhost ~]$ docker network prune # Удалить все сети, где нет контейнеров
+br02
+
+#Сценарий 2. Пример с созданием контейнера в сети:
+[fas@localhost ~]$ docker network create --subnet 10.1.0.0/16 --gateway 10.1.0.1 \
+> --ip-range=10.1.4.0/24 --driver=bridge --label=host4network br04 # Пример создания сети с большим количеством параметров
+
+[fas@localhost ~]$ docker container run --name network-test01 -it --network br04 centos /bin/bash # Создать контейнер в сети br04
+[root@37da40aee77f /]# yum update -y
+[root@37da40aee77f /]# yum install -y net-tools
+[root@37da40aee77f /]# ifconfig # IP выдан из range
+eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 10.1.4.0  netmask 255.255.0.0  broadcast 10.1.255.255
+[root@37da40aee77f /]# netstat -rn # Таблица маршрутизации согласно полному диапазону сети r04
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags   MSS Window  irtt Iface
+0.0.0.0         10.1.0.1        0.0.0.0         UG        0 0          0 eth0
+10.1.0.0        0.0.0.0         255.255.0.0     U         0 0          0 eth0
+[root@37da40aee77f /]# cat /etc/resolv.conf # Информация о DNS
+nameserver 127.0.0.11
+options ndots:0
+[root@37da40aee77f /]# ping google.com # Пинг отработает, DNS  в порядке
+PING google.com (108.177.14.113) 56(84) bytes of data.
+
+#Сценарий 3. Пример с созданием контейнера в сети с указанием IP-адреса:
+[fas@localhost ~]$ docker container run --name network-test02 -d --ip 10.1.4.102 --network br04 nginx
+[fas@localhost ~]$ docker container inspect network-test02 | grep IPAdd
+            "SecondaryIPAddresses": null,
+            "IPAddress": "",
+                    "IPAddress": "10.1.4.102",
+					
+#Сценарий 4. Пример с маршрутизацией контейнеров
+[fas@localhost ~]$ docker network create -d bridge --internal localhost # Создать сеть с отсутствием доступа c других интерфейсов | --internal - Restrict external access to the network | Тут будет 172.18.0.0/16
+[fas@localhost ~]$ docker container run -d --name test_mysql -e MYSQL_ROOT_PASSWORD=P4sSw0rd0 --network localhost mysql:5.7 # Контейнер с MySQL | -e - внешние переменные
+[fas@localhost ~]$ docker container run -it --name ping-mysql --network bridge centos # Контейнер с CentOS, который должен будет пинговать MySQL
+[fas@localhost ~]$ docker network connect localhost ping-mysql # Связать этот контейнер с сетью localhost, где находится MySQL
+[fas@localhost ~]$ docker container start -ia ping-mysql # Запустить контейнер ping-mysql заново |  -a, --attach Attach STDOUT/STDERR and forward signals |  -i, --interactive Attach container's STDIN
+[root@2129810636fe /]# ping test_mysql
+PING test_mysql (172.18.0.2) 56(84) bytes of data.
+64 bytes from test_mysql.localhost (172.18.0.2): icmp_seq=1 ttl=64 time=0.048 ms # Пинг работает
+
+[fas@localhost ~]$ docker container run -it --name cant-ping-mysql centos # Создать контейнер в другой сети, который не может пинговать изолированный test_mysql
+[root@e9b7f7a954e1 /]# ping test_mysql
+ping: test_mysql: Name or service not known
+
+[fas@localhost ~]$ docker container run -d --name private-nginx -p 8081:80 --network localhost nginx 
+[fas@localhost ~]$ curl localhost:8081 # Не будет доступа, так как это изолированная сеть
+curl: (7) Failed connect to localhost:8081; Connection refused 
+[fas@localhost ~]$ docker container inspect private-nginx | grep IPAdd
+            "SecondaryIPAddresses": null,
+            "IPAddress": "",
+                    "IPAddress": "172.18.0.3",
+[fas@localhost ~]$ curl 172.18.0.3 # Но можно зайти по внутреннему IP
+<!DOCTYPE html>
+<html>
+
+###############
+#Labs#
+###############
+Create a bridge network called frontend that will be publicly accessible.
+Create a second bridge network called localhost that will be internal.
+Deploy a MySQL container called database that will use the localhost network. Use the mysql 5.7 image:
+Use the -e flag to set MYSQL_ROOT_PASSWORD to "P4ssW0rd0!".
+The MySQL container should run in the background.
+Next, deploy a second container called frontend-app. Connect it to the frontend network using the --network flag. Use the latest Nginx image. The Nginx container should run in the background.
+Once the Nginx container is created, connect it to the localhost network.
+
+[user@host]$ docker network create frontend
+[user@host]$ docker network create localhost --internal
+[user@host]$ docker container run -d --name database --network localhost -e MYSQL_ROOT_PASSWORD=P4ssW0rd0! mysql:5.7
+[user@host]$ docker container run -d --name frontend-app --network frontend nginx:latest
+[user@host]$ docker network connect localhost frontend-app
+[cloud_user@ip-10-0-1-45 ~]$ docker network ls
+NETWORK ID          NAME                DRIVER              SCOPE
+4b3129a9bf30        frontend            bridge              local
+c272ff39abbd        localhost           bridge              local
+[cloud_user@ip-10-0-1-45 ~]$ docker container inspect frontend-app | grep Network # ВАЖНО, ЧТО контейнер с NGINX будет находиться в двух сетях одновременно
+            "NetworkMode": "frontend",
+        "NetworkSettings": {
+            "Networks": {
+                    "NetworkID": "4b3129a9bf30cbc2bd073ee3b167cb374cf8caa3a3b402db4cdfb72fb6abfda8",
+                    "NetworkID": "c272ff39abbdc7330f61bab1c3bdbcc17161b8c3d14ebd5f6c6e1414803a9a80",
+
+###############
+#Storage Overview#
+###############
+Categories of data storage:
+	Non-persistent
+		Local storage
+		Data that is ephemeral
+		Every container has it
+		Tied to the lifecycle of the contain
+	Persistent
+		Volumes
+			Volumes are decoupled from containers
+
+Non-persistent Data
+	Non-persistent data:
+		By default all container use local storage
+		Storage locations:
+			Linux: /var/lib/docker/[STORAGE-DRIVER]/
+			Windows: C:\ProgramData\Docker\windowsfilter\
+		Storage Drivers:
+			RHEL uses overlay2.
+			Ubuntu uses overlay2 or aufs.
+			SUSE uses btrfs.
+			Windows uses its own.
+
+Persistent Data Using Volumes
+	Volumes:
+		Use a volume for persistent data:
+			Create the volume first, then create your container.
+		Mounted to a directory in the container
+		Data is written to the volume
+		Deleting a container does not delete the volume
+		First-class citizens
+		Uses the local driver
+		Third party drivers:
+			Block storage
+			File storage
+			Object storage
+		Storage locations:
+			Linux: /var/lib/docker/volumes/
+			Windows: C:\ProgramData\Docker\volumes
+			
+###############
+#Volume Commands#
+###############
+docker volume -h # Показать список команд
+	create: Create a volume.
+	inspect: Display detailed information on one or more volumes.
+	ls: List volumes.
+	prune: Remove all unused local volumes.
+	rm: Remove one or more volumes.
+	
+List all volumes on a host:	
+	docker volume ls
+
+Create two new volumes:
+	docker volume create test-volume1
+	docker volume create test-volume2
+
+Get the flags available when creating a volume:
+	docker volume create -h
+
+Inspecting a volume:
+	docker volume inspect test-volume1
+
+Deleting a volume:
+	docker volume rm test-volume
+
+Removing all unused volumes:
+	docker volume prune
+	
+###############
+#Using Bind Mounts#
+###############
+With bind mount, a file or directory on the host machine is mounted into a container.
+#Сценарий 1. Используем флаг mount и тип bind
+[fas@localhost ~]$ mkdir target
+[fas@localhost ~]$ docker container run -d --name nginx-bind-mount1 --mount type=bind,source="$(pwd)"/target,target=/app nginx # Используем флаг mount и тип bind
+[fas@localhost ~]$ docker volume ls # тип bind не показывается при листинге
+DRIVER              VOLUME NAME
+[fas@localhost ~]$ docker container inspect nginx-bind-mount1
+"Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/home/fas/target", # Директория на самом хосте
+                "Destination": "/app",  # проециркется на директорию в контейнере
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+[fas@localhost ~]$ vi target/file1.txt # Создать файл в директории /target/file1
+[fas@localhost ~]$ docker container exec -it nginx-bind-mount1 /bin/bash
+root@a3a626241488:/# ls /app
+file1.txt # Файл уже тут (в обратную сторону тоже работает)
+
+#Сценарий 2. Используем флаг v
+[fas@localhost ~]$ docker container run -d --name nginx-bind-mount2 -v "$(pwd)"/target2:/app nginx # Папку target2 заранее можно не создавать
+[fas@localhost ~]$ docker container exec -it nginx-bind-mount2 touch /app/file3.txt # Удаленно выполнить создание файла в контейнере
+[fas@localhost ~]$ ls target2
+file3.txt
+
+#Сценарий 3. Подстановка файла конфигурации в NGINX
+[fas@localhost ~]$ mkdir nginx # Создание директории
+[fas@localhost ~]$ cat << EOF >  nginx/nginx.conf # Создание файла
+> user  nginx;
+> worker_processes  1;
+>
+> error_log  /var/log/nginx/error.log warn;
+> pid        /var/run/nginx.pid;
+>
+>
+> events {
+>     worker_connections  1024;
+> }
+>
+>
+> http {
+>     include       /etc/nginx/mime.types;
+>     default_type  application/octet-stream;
+>
+>     log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+>                       '$status $body_bytes_sent "$http_referer" '
+>                       '"$http_user_agent" "$http_x_forwarded_for"';
+>
+>     access_log  /var/log/nginx/access.log  main;
+>
+>     sendfile        on;
+>     #tcp_nopush     on;
+>
+>     keepalive_timeout  65;
+>
+>     #gzip  on;
+>
+>     include /etc/nginx/conf.d/*.conf;
+> }
+> EOF
+[fas@localhost ~]$ docker container run -d --name nginx-bind-mount3 -v "$(pwd)"/nginx/nginx.conf:/etc/nginx/nginx.conf nginx
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/home/fas/nginx/nginx.conf",
+                "Destination": "/etc/nginx/nginx.conf",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+		
+###############
+#Using Volumes for Persistent Storage#
+###############
+Volume drivers allow for:
+	Storing volumes on remote hosts or cloud providers
+	Encrypting the contents of volumes
+	Add other functionality
+	
+[fas@localhost ~]$ docker volume create html-volume # Создаем том
+html-volume
+
+#Сценарий 1. Используем флаг mount
+[fas@localhost ~]$ docker container run -d --name nginx-volume1 --mount type=volume,source=html-volume,target=/usr/share/nginx/html/ nginx # Создание контейнера и примонтирование к нему тома
+[fas@localhost ~]$ docker volume inspect html-volume # Вывод информации о томе
+[
+    {
+        "CreatedAt": "2020-01-22T09:33:55-05:00",
+        "Driver": "local",
+        "Labels": {},
+        "Mountpoint": "/var/lib/docker/volumes/html-volume/_data", # Здесь лежит том
+        "Name": "html-volume",
+        "Options": {},
+        "Scope": "local"
+    }
+]
+[root@localhost ~]# ls /var/lib/docker/volumes/html-volume/_data # Содержимое тома
+50x.html  index.html
+
+#Сценарий 2. Используем флаг v
+[fas@localhost ~]$ docker container run -d --name nginx-volume2 -v html-volume:/usr/share/nginx/html/ nginx
+[root@localhost ~]# vi /var/lib/docker/volumes/html-volume/_data/index.html # Изменяем содержимое файла
+<!DOCTYPE html>
+
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+ Hello World!
+</body>
+</html>
+[fas@localhost ~]$ docker container inspect nginx-volume2 | grep IPAdd
+            "SecondaryIPAddresses": null,
+            "IPAddress": "172.17.0.3",
+                    "IPAddress": "172.17.0.3",
+[fas@localhost ~]$ curl 172.17.0.3:80 # Проверка, что страница изменилась
+<!DOCTYPE html>
+
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+ Hello World!
+</body>
+</html>
+
+#Сценарий 3. Ограничение прав на файл
+[fas@localhost ~]$ docker run -d --name=nginx-volume3 --mount source=html-volume,target=/usr/share/nginx/html,readonly nginx  # readonly не даст изменить файл из контейнера
+
+###############
+#Lab#
+###############
+[cloud_user@host]$ docker volume create mysql_data # Создать том
+[cloud_user@host]$ docker container run -d --name app-database \ # Сохранить данные БД в томе, чтобы они не перезаписывались
+ --mount type=volume,source=mysql_data,target=/var/lib/mysql \
+ -e MYSQL_ROOT_PASSWORD=P4ssW0rd0! \
+ mysql:latest
+[cloud_user@ip-10-0-1-174 ~]$ docker container inspect app-database
+
+											#####Docker Images#####
+###############
+#Introduction to the Dockerfile#
+###############	
+Dockerfiles are instructions. They contains all of the commands used to build an image.
+	Docker images consist of read-only layers.
+	Each represents a Dockerfile instruction.
+	Layers are stacked.
+	Each layer is a result of the changes from the previous layer.
+	Images are built using the docker image build command.
+
+Dockerfile:  
+	FROM ubuntu:15.04  
+	COPY . /app  
+	RUN make /app  
+	CMD python /app/app.py
+
+Dockerfile Layers
+	FROM creates a layer from the ubuntu:15.04 Docker image.
+	COPY adds files from your Docker client’s current directory.
+	RUN builds your application with make.
+	CMD specifies what command to run within the container.							
+
+Best Practices
+	Keep containers as ephemeral as possible.
+	Follow Principle 6 of the 12 Factor App.
+	Avoid including unnecessary files.
+	Use .dockerignore.
+	Use multi-stage builds.
+	Don’t install unnecessary packages.
+	Decouple applications.
+	Minimize the number of layers.
+	Sort multi-line arguments.
+	Leverage build cache.
+	
+###############
+#Working with Instructions#
+###############
+#Шаг 1. Создаем окружение
+[fas@localhost ~]$ sudo yum install git -y # Установка Git
+[fas@localhost ~]$ mkdir docker_images # Создание каталогов
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ mkdir weather-app
+[fas@localhost docker_images]$ cd weather-app/
+[fas@localhost weather-app]$ git clone https://github.com/linuxacademy/content-weather-app.git src # Клонируем только директорию src
+Cloning into 'src'...
+remote: Enumerating objects: 35, done.
+remote: Total 35 (delta 0), reused 0 (delta 0), pack-reused 35
+Unpacking objects: 100% (35/35), done.
+[fas@localhost weather-app]$ ls
+src
+
+#Шаг 2. Работа с докером
+[fas@localhost weather-app]$ vi Dockerfile
+	# Create an image for the weather-app
+	FROM node #  Базовый образ Node, который можно найти на Docker Hub
+	LABEL org.label-schema.version=v1.1 # Добавляем метаданные, то есть данные, относящиеся к дополнительной информации о содержимом или объекте
+	RUN mkdir -p /var/node # Выполнить команду в контайнере, кгда он будет создаваться
+	ADD src/ /var/node/ # Копируем директорию /src  с локального хоста в контейнер /var/node/
+	WORKDIR /var/node # Sets the working directory for any RUN, CMD, ENTRYPOINT, COPY, and ADD instructions that follow it in the Dockerfile
+	RUN npm install # Устанавливаем пакетный менеджер
+	EXPOSE 3000  # Указываем, что контейнер использует 3000 порт
+	CMD ./bin/www # Предоставляет значение по умолчанию для исполняющего контейнера. В Dockerfile может быть только одна инструкция CMD
+
+[fas@localhost weather-app]$ docker image build -t linuxacademy/weather-app:v1 . # Создаем image
+[fas@localhost weather-app]$ docker image ls
+REPOSITORY                        TAG                 IMAGE ID            CREATED             SIZE
+linuxacademy/weather-app          v1                  369aee87b11e        10 seconds ago      960MB
+
+
+[fas@localhost weather-app]$ docker container run -d --name weather-app1 -p 8081:3000 linuxacademy/weather-app:v1 # Создаем контейнер
+1ddc653b71e074db1a9b112647fd278c17b4b705b555b0050680d5a07fd1ed17
+[fas@localhost weather-app]$ docker ps
+CONTAINER ID        IMAGE                         COMMAND                  CREATED             STATUS              PORTS                    NAMES
+1ddc653b71e0        linuxacademy/weather-app:v1   "docker-entrypoint.s…"   5 seconds ago       Up 4 seconds        0.0.0.0:8081->3000/tcp   weather-app1
+
+
+[fas@localhost weather-app]$ curl localhost:8081 # Проверка, приложение работает
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Test</title>
+	
+#Справочник команд в Dockerfile:
+	FROM: Initializes a new build stage and sets the Base Image
+	RUN: Will execute any commands in a new layer
+	CMD: Provides a default for an executing container. There can only be one CMD instruction in a Dockerfile
+	LABEL: Adds metadata to an image
+	EXPOSE: Informs Docker that the container listens on the specified network ports at runtime
+	ENV: Sets the environment variable <key> to the value <value>
+	ADD: Copies new files, directories or remote file URLs from <src> and adds them to the filesystem of the image at the path <dest>.
+	COPY: Copies new files or directories from <src> and adds them to the filesystem of the container at the path <dest>.
+	ENTRYPOINT: Allows for configuring a container that will run as an executable
+	VOLUME: Creates a mount point with the specified name and marks it as holding externally mounted volumes from native host or other containers
+	USER: Sets the user name (or UID) and optionally the user group (or GID) to use when running the image and for any RUN, CMD, and ENTRYPOINT instructions that follow it in the Dockerfile
+	WORKDIR: Sets the working directory for any RUN, CMD, ENTRYPOINT, COPY, and ADD instructions that follow it in the Dockerfile
+	ARG: Defines a variable that users can pass at build-time to the builder with the docker build command, using the --build-arg <varname>=<value> flag
+	ONBUILD: Adds a trigger instruction to the image that will be executed at a later time, when the image is used as the base for another build
+	HEALTHCHECK: Tells Docker how to test a container to check that it is still working
+	SHELL: Allows the default shell used for the shell form of commands to be overridden
+	
+	CMD: Она позволяет указать некую команду с параметрами, которая будет выполнена при запуске контейнера, и, при необходимости, может быть переопределена средствами командной строки.
+###############
+#Environment Variables#
+###############
+# Часть кода https://github.com/linuxacademy/content-weather-app/blob/master/bin/www
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '3000'); # Или переменная окружения или порт 3000
+app.set('port', port);
+
+
+#Шаг 1. Создаем окружение
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ mkdir env
+[fas@localhost docker_images]$ cd env
+[fas@localhost env]$ git clone https://github.com/linuxacademy/content-weather-app.git src
+Cloning into 'src'...
+remote: Enumerating objects: 35, done.
+remote: Total 35 (delta 0), reused 0 (delta 0), pack-reused 35
+Unpacking objects: 100% (35/35), done.
+[fas@localhost env]$ ls
+src
+
+#Шаг 2. Работа с докером
+[fas@localhost env]$ vi Dockerfile
+
+	# Create an image for the weather-app
+	FROM node
+	LABEL org.label-schema.version=v1.1
+	ENV NODE_ENV="development"
+	ENV PORT 3000 # Создаем переменную окружения
+
+	RUN mkdir -p /var/node
+	ADD src/ /var/node/
+	WORKDIR /var/node
+	RUN npm install
+	EXPOSE $PORT # Передаем переменную окружения
+	CMD ./bin/www
+
+[fas@localhost env]$ docker image build -t linuxacademy/weather-app:v2 .
+[fas@localhost env]$ docker image inspect linuxacademy/weather-app:v2
+"Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "NODE_VERSION=13.7.0",
+                "YARN_VERSION=1.21.1",
+                "NODE_ENV=development",
+                "PORT=3000"
+
+#Шаг 3. Создаем контейнер для окружения development и изменяем порт
+[fas@localhost env]$ docker container run -d --name weather-dev -p 8082:3001 --env PORT=3001 linuxacademy/weather-app:v2
+4ed51604e3590e99442440386340b3d59915d32ee18b6fd7fa8847cd804fe62e
+[fas@localhost env]$ docker ps
+CONTAINER ID        IMAGE                         COMMAND                  CREATED             STATUS              PORTS                              NAMES
+4ed51604e359        linuxacademy/weather-app:v2   "docker-entrypoint.s…"   14 seconds ago      Up 13 seconds       3000/tcp, 0.0.0.0:8082->3001/tcp   weather-dev # Приложение теперь работает на 3001
+
+[fas@localhost env]$ docker container inspect weather-dev | grep PORT
+                "PORT=3001",
+[fas@localhost env]$ curl localhost:3000
+curl: (7) Failed connect to localhost:3000; Connection refused
+[fas@localhost env]$ curl localhost:8082 # Проверка по 8082
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Test</title>
+
+#Шаг 4. Создаем контейнер для окружения production и изменяем порт
+[fas@localhost env]$ docker container run -d --name weather-app2 -p 8083:3001 --env PORT=3001 --env NODE_ENV=production linuxacademy/weather-app:v2
+[fas@localhost env]$ docker container inspect weather-app2 | grep PORT
+                "PORT=3001",
+[fas@localhost env]$ docker container inspect weather-app2 | grep ENV
+                "NODE_ENV=production",
+[fas@localhost env]$ docker ps
+CONTAINER ID        IMAGE                         COMMAND                  CREATED              STATUS              PORTS                              NAMES
+a1c78b113166        linuxacademy/weather-app:v2   "docker-entrypoint.s…"   About a minute ago   Up About a minute   3000/tcp, 0.0.0.0:8083->3001/tcp   weather-app2
+[fas@localhost env]$ curl localhost:8083
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Test</title>
+
+В приложении настроено логирование порта (строки 84-91)
+https://github.com/linuxacademy/content-weather-app/blob/master/bin/www
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+  console.log('Listening on ' + bind);
+}
+
+[fas@localhost env]$ docker container logs weather-app2 # Логирование
+Listening on port 3001
+GET / 200 17.040 ms - 619
+
+#Шаг 4. Создаем контейнер для окружения production, но не меняем стандартный порт
+[fas@localhost env]$ docker container run -d --name weather-prod -p 8084:3000 --env NODE_ENV=production linuxacademy/weather-app:v2
+[fas@localhost env]$ docker container logs weather-prod
+Listening on port 3000
+[fas@localhost env]$ docker ps
+CONTAINER ID        IMAGE                         COMMAND                  CREATED             STATUS              PORTS                              NAMES
+35c9b2a7db4c        linuxacademy/weather-app:v2   "docker-entrypoint.s…"   35 seconds ago      Up 33 seconds       0.0.0.0:8084->3000/tcp             weather-prod
+[fas@localhost env]$ curl localhost:8084
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Test</title>
+
+###############
+#Build Arguments#
+###############
+#Шаг 1. Создаем окружение
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ mkdir args
+[fas@localhost docker_images]$ cd args/
+[fas@localhost args]$ git clone https://github.com/linuxacademy/content-weather-app.git src
+Cloning into 'src'...
+remote: Enumerating objects: 35, done.
+remote: Total 35 (delta 0), reused 0 (delta 0), pack-reused 35
+Unpacking objects: 100% (35/35), done.
+
+#Шаг 2. Работа с докером
+#ENV определена в коде и еще может использоваться в Dockerfile
+#ARG - внутренняя переменная Dockerfile
+[fas@localhost args]$ vi Dockerfile
+	# Create an image for the weather-app
+	FROM node
+	LABEL org.label-schema.version=v1.1
+	ARG SRC_DIR=/var/node # Defines a variable that users can pass at build-time to the builder with the docker build command, using the --build-arg <varname>=<value> flag
+
+	RUN mkdir -p $SRC_DIR
+	ADD src/ $SRC_DIR
+	WORKDIR $SRC_DIR
+	RUN npm install
+	EXPOSE 3000
+	CMD ./bin/www
+	
+[fas@localhost args]$ docker image build -t linuxacademy/weather-app:v3 --build-arg SRC_DIR=/var/code . # Создание image и передача аргументов
+[fas@localhost args]$ docker image inspect linuxacademy/weather-app:v3 | grep WorkingDir
+            "WorkingDir": "/var/code",
+            "WorkingDir": "/var/code",
+			
+#Шаг 3. Создаем контейнер
+[fas@localhost args]$ docker container run -d --name weather-app3 -p 8085:3000 linuxacademy/weather-app:v3
+2902ef4ce2fd5c380acb983289471afdcd86e8ab8ff065c1766e35642ab68404
+[fas@localhost args]$ docker ps # Проверка работоспособности приложения
+CONTAINER ID        IMAGE                         COMMAND                  CREATED             STATUS              PORTS                    NAMES
+2902ef4ce2fd        linuxacademy/weather-app:v3   "docker-entrypoint.s…"   7 seconds ago       Up 6 seconds        0.0.0.0:8085->3000/tcp   weather-app3
+[fas@localhost args]$ curl localhost:8085
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Test</title>
+
+###############
+#Working with Non-privileged User#
+###############
+#Сценарий 1. Создаем пользователя и заходим под ним в контейнер
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ mkdir non-privileged-user
+[fas@localhost docker_images]$ cd non-privileged-user/
+[fas@localhost non-privileged-user]$ vi Dockerfile
+	# Creates a CentOS image that uses cloud_user as a non-privileged user
+	FROM centos:latest
+	RUN useradd -ms /bin/bash cloud_user # Создать пользователя | -m создать для пользователя домашний каталог | -s задать стартовую оболочку (/bin/sh) - после можно изменить в файле /etc/passwd
+	USER cloud_user
+	
+[fas@localhost non-privileged-user]$ docker image build -t centos7/nonroot:v1 .
+[fas@localhost non-privileged-user]$ docker container run -it --name test-build centos7/nonroot:v1 /bin/bash
+[cloud_user@0bbbccec9dda /]$ # При логировании мы сразу используем созданного ползователя cloud_user
+
+[fas@localhost non-privileged-user]$ docker container start test-build # Запустить контейнер заново
+test-build
+[fas@localhost non-privileged-user]$ docker container exec -u 0 -it test-build /bin/bash # Зайти в контейнер под root (-u 0)
+[root@0bbbccec9dda /]#
+
+#Сценарий 2. Создаем пользователя и запускаем им приложение 
+[fas@localhost non-privileged-user]$ cd ~/docker_images/
+[fas@localhost docker_images]$ mkdir node-non-privileged-user
+[fas@localhost docker_images]$ cd node-non-privileged-user/
+[fas@localhost node-non-privileged-user]$ git clone https://github.com/linuxacademy/content-weather-app.git src.
+[fas@localhost node-non-privileged-user]$ vi Dockerfile
+	# Create an image for the weather-app
+	FROM node
+	LABEL org.label-schema.version=v1.1
+	RUN useradd -ms /bin/bash node_user # Создать пользователя
+	USER node_user # Sets the user name (or UID) and optionally the user group (or GID) to use when running the image and for any RUN, CMD, and ENTRYPOINT instructions that follow it in the Dockerfile
+	ADD src/ /home/node_user # Директория для node_user
+	WORKDIR /home/node_user
+	RUN npm install
+	EXPOSE 3000
+	CMD ./bin/www
+	
+[fas@localhost node-non-privileged-user]$ docker image build -t linuxacademy/weather-app-nonroot:v1 .
+
+[fas@localhost node-non-privileged-user]$ docker container run -d --name weather-app-nonroot -p 8086:3000 linuxacademy/weather-app-nonroot:v1
+[fas@localhost node-non-privileged-user]$ docker ps
+CONTAINER ID        IMAGE                                 COMMAND                  CREATED             STATUS              PORTS                    NAMES
+1b8bf556fb51        linuxacademy/weather-app-nonroot:v1   "docker-entrypoint.s…"   6 seconds ago       Up 5 seconds        0.0.0.0:8086->3000/tcp   weather-app-nonroot
+[fas@localhost node-non-privileged-user]$ curl localhost:8086 # Приложение работает и использует и контейнер использует non-privileged user
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Test</title>
+	
+###############
+#Order of Execution#
+###############
+[fas@localhost node-non-privileged-user]$ cd ../..
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ mkdir centos-conf
+[fas@localhost docker_images]$ cd centos-conf/
+[fas@localhost centos-conf]$ vi Dockerfile
+	# Creates a CentOS image that uses cloud_user as a non-privileged user
+	FROM centos:latest
+	RUN mkdir -p ~/new-dir1
+	RUN useradd -ms /bin/bash cloud_user
+	USER cloud_user # Далее будем использовать пользователя cloud_user для всех RUN
+	RUN mkdir -p ~/new-dir2
+	RUN mkdir -p /etc/myconf
+	RUN echo "Some config data" >> /etc/myconf/my.conf
+[fas@localhost centos-conf]$ docker image build -t centos7/myconf:v1 .
+Step 6/7 : RUN mkdir -p /etc/myconf
+ ---> Running in 8caff45ba192
+mkdir: cannot create directory '/etc/myconf': Permission denied # Ошибка при создании директории
+The command '/bin/sh -c mkdir -p /etc/myconf' returned a non-zero code: 1
+Чтобы все отработало нужно изменить порядок выполнения команд
+
+###############
+#Using the Volume Instruction#
+###############
+[fas@localhost docker_images]$ mkdir volumes
+[fas@localhost docker_images]$ cd volumes/
+[fas@localhost volumes]$ vi Dockerfile
+	FROM nginx:latest
+	VOLUME ["/usr/share/nginx/html/"] # Создает точку монтирования с указанным именем и помечает ее как содержащую внешние тома из собственного хоста или других контейнеров.
+	
+[fas@localhost volumes]$ docker image build -t linuxacademy/nginx:v1 .
+
+[fas@localhost volumes]$ docker container run -d --name nginx-volume linuxacademy/nginx:v1
+
+[fas@localhost volumes]$ docker container inspect nginx-volume | grep vol
+        "Name": "/nginx-volume",
+                "Type": "volume",
+                "Source": "/var/lib/docker/volumes/6f9fce3b56cb078ae297ed4cb8451300f633a1b1b984ac75000452c2ed96cf24/_data", # Прикреплен том со случайным названием
+
+[fas@localhost volumes]$ docker volume ls | grep 6f9fce3b56cb078ae297ed4cb8451300f633a1b1b984ac75000452c2ed96cf24
+local               6f9fce3b56cb078ae297ed4cb8451300f633a1b1b984ac75000452c2ed96cf24
+[fas@localhost volumes]$ docker volume inspect 6f9fce3b56cb078ae297ed4cb8451300f633a1b1b984ac75000452c2ed96cf24
+[
+    {
+        "CreatedAt": "2020-01-23T04:27:25-05:00",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/6f9fce3b56cb078ae297ed4cb8451300f633a1b1b984ac75000452c2ed96cf24/_data",
+        "Name": "6f9fce3b56cb078ae297ed4cb8451300f633a1b1b984ac75000452c2ed96cf24",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+
+[root@localhost ~]# ls /var/lib/docker/volumes/6f9fce3b56cb078ae297ed4cb8451300f633a1b1b984ac75000452c2ed96cf24/_data
+50x.html  index.html
+
+###############
+# Entrypoint vs. Command#
+###############
+https://github.com/prometheus/prometheus/blob/master/Dockerfile
+
+Though ENTRYPOINT functions very similarly to CMD it's behaviors are vary different.
+	ENTRYPOINT allows us to configure a container that will run as an executable.
+	We can override all elements specified using CMD.
+	Using the docker run --entrypoint flag will override the ENTRYPOINT instruction.
+
+#Сценарий 1. Замена CMD на ENTRYPOINT
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ mkdir entrypoint
+[fas@localhost docker_images]$ cd entrypoint/
+[fas@localhost entrypoint]$ git clone https://github.com/linuxacademy/content-weather-app.git src
+[fas@localhost entrypoint]$ vi Dockerfile
+	# Create an image for the weather-app
+	FROM node
+	LABEL org.label-schema.version=v1.1
+	ENV NODE_ENV="production"
+	ENV PORT 3001
+
+	RUN mkdir -p /var/node
+	ADD src/ /var/node/
+	WORKDIR /var/node
+	RUN npm install
+	EXPOSE $PORT
+	ENTRYPOINT ./bin/www # Используем вместо CMD
+	
+[fas@localhost entrypoint]$ docker image build -t linuxacademy/weather-app:v4 .
+[fas@localhost entrypoint]$ docker container run -d --name weather-app4 linuxacademy/weather-app:v4
+
+[fas@localhost entrypoint]$ docker container inspect weather-app4 | grep Cmd
+            "Cmd": null, # Не задано
+[fas@localhost entrypoint]$ docker container inspect weather-app-nonroot # Для сравнения из предыдущих примеров
+            "Cmd": [
+                "/bin/sh",
+                "-c",
+                "./bin/www"
+				
+#Сценарий 2. Совместное использование CMD и ENTRYPOINT на примере Prometheus
+[fas@localhost entrypoint]$ docker container run -d --name weather-app5 -p 8083:3001 linuxacademy/weather-app:v4 echo "Hello World"
+
+[fas@localhost entrypoint]$ docker container inspect weather-app5
+	"Args": [
+            "-c",
+            "./bin/www", # Из Dockerfile (см. Сценарий №1)
+            "echo", # Передается при запуске
+            "Hello World"
+			],
+
+			"Cmd": [ # Передается при запуске
+                "echo", 
+                "Hello World"
+			],
+			
+# Создаем тома для хранения файлов prometheus	
+[fas@localhost entrypoint]$ docker volume create prometheus
+[fas@localhost entrypoint]$ docker volume create prometheus_data
+
+[root@localhost ~]# sudo yum install nfs-utils nfs-utils-lib # Потом появится пользователь nfsnobody
+[root@localhost ~]# cat /etc/passwd | grep nfs
+rpcuser:x:29:29:RPC Service User:/var/lib/nfs:/sbin/nologin
+nfsnobody:x:65534:65534:Anonymous NFS User:/var/lib/nfs:/sbin/nologin
+
+#Сделать так чтобы были полные права (это необходимо для запуска контейнера)
+[root@localhost ~]# chown -R nfsnobody:nfsnobody /var/lib/docker/volumes/prometheus_data/ # или [root@localhost ~]# chmod 777 -R /var/lib/docker/volumes/prometheus_data/
+[root@localhost ~]# chown -R nfsnobody:nfsnobody /var/lib/docker/volumes/prometheus/ # или [root@localhost ~]# chmod 777 -R /var/lib/docker/volumes/prometheus/
+
+[fas@localhost entrypoint]$ docker run --name prometheus -d -p 8084:9090 -v prometheus:/etc/prometheus -v prometheus_data:/prometheus/data prom/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus/data # Запускаем контейнер
+
+[fas@localhost entrypoint]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                    NAMES
+d9e84503e68d        prom/prometheus     "/bin/prometheus --c…"   8 seconds ago       Up 7 seconds        0.0.0.0:8084->9090/tcp   prometheus
+
+[fas@localhost entrypoint]$ curl localhost:8084
+<a href="/graph">Found</a>.
+
+[fas@localhost entrypoint]$ docker container inspect prometheus
+        "Path": "/bin/prometheus",
+		"Args": [
+            "--config.file=/etc/prometheus/prometheus.yml",
+            "--storage.tsdb.path=/prometheus/data"
+        ],
+		
+		"Cmd": [
+                "--config.file=/etc/prometheus/prometheus.yml",
+                "--storage.tsdb.path=/prometheus/data"
+            ],
+
+Аналогично в Dockerfile: https://github.com/prometheus/prometheus/blob/master/Dockerfile
+ENTRYPOINT [ "/bin/prometheus" ]
+CMD        [ "--config.file=/etc/prometheus/prometheus.yml", \
+             "--storage.tsdb.path=/prometheus", \
+             "--web.console.libraries=/usr/share/prometheus/console_libraries", \
+             "--web.console.templates=/usr/share/prometheus/consoles" ]
+
+###############
+#Using .dockerignore#
+###############
+#Шаг 1. Создаем окружение
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ mkdir dockerignore
+[fas@localhost docker_images]$ cd dockerignore/
+[fas@localhost dockerignore]$ git clone https://github.com/linuxacademy/content-weather-app.git src
+
+[fas@localhost dockerignore]$ cd src/
+[fas@localhost src]$ git branch
+* master
+[fas@localhost src]$ git checkout dockerignore # Переключаемся на другую ветку
+Branch dockerignore set up to track remote branch dockerignore from origin.
+Switched to a new branch 'dockerignore'
+[fas@localhost src]$ git branch # Проверяем ветку
+* dockerignore
+  master
+[fas@localhost src]$ cd ../
+[fas@localhost dockerignore]$ vi .dockerignore # Создаем файл исключений
+	# Ignore these files
+	*/*.md
+	*/.git
+	src/docs/
+	*/tests/
+
+[fas@localhost dockerignore]$ vi Dockerfile # Создаем Dockerfile
+	# Create an image for the weather-app
+	FROM node
+	LABEL org.label-schema.version=v1.1
+	ENV NODE_ENV="production"
+	ENV PORT 3000
+	
+	RUN mkdir -p /var/node
+	ADD src/ /var/node/
+	WORKDIR /var/node
+	RUN npm install
+	EXPOSE $PORT
+	ENTRYPOINT ["./bin/www"]
+
+
+#Шаг 2. Создаем image и контейнер
+[fas@localhost dockerignore]$ docker image build -t linuxacademy/weather-app:v5 .
+[fas@localhost dockerignore]$ docker container run -d --name weather-app-ignore linuxacademy/weather-app:v5
+
+[fas@localhost dockerignore]$ docker container exec weather-app-ignore ls -la /var/node # Проверяем содержимое (ADD src/ /var/node/)
+total 64
+drwxr-xr-x.   1 root root    51 Jan 23 12:56 .
+drwxr-xr-x.   1 root root    18 Jan 23 12:55 ..
+-rw-rw-r--.   1 root root  1191 Jan 23 12:48 app.js
+drwxrwxr-x.   2 root root    17 Jan 23 12:48 bin
+-rw-rw-r--.   1 root root   166 Jan 23 12:48 config.js
+drwxr-xr-x. 161 root root  4096 Jan 23 12:56 node_modules
+-rw-rw-r--.   1 root root 44174 Jan 23 12:56 package-lock.json
+-rw-rw-r--.   1 root root   378 Jan 23 12:48 package.json
+drwxrwxr-x.   3 root root    25 Jan 23 12:48 public
+drwxrwxr-x.   2 root root    22 Jan 23 12:48 routes
+drwxrwxr-x.   2 root root    40 Jan 23 12:48 views
+[fas@localhost dockerignore]$ ls -alt src/
+total 60
+drwxrwxr-x. 3 fas fas    56 Jan 23 07:51 ..
+drwxrwxr-x. 8 fas fas   163 Jan 23 07:49 .git # Попал в dockerignore
+drwxrwxr-x. 9 fas fas   188 Jan 23 07:49 .
+drwxrwxr-x. 2 fas fas    22 Jan 23 07:49 docs  # Попал в dockerignore
+drwxrwxr-x. 2 fas fas    22 Jan 23 07:49 tests  # Попал в dockerignore
+-rw-rw-r--. 1 fas fas    23 Jan 23 07:49 README.md # Попал в dockerignore
+-rw-rw-r--. 1 fas fas   378 Jan 23 07:48 package.json
+-rw-rw-r--. 1 fas fas 43994 Jan 23 07:48 package-lock.json
+drwxrwxr-x. 3 fas fas    25 Jan 23 07:48 public
+drwxrwxr-x. 2 fas fas    22 Jan 23 07:48 routes
+drwxrwxr-x. 2 fas fas    40 Jan 23 07:48 views
+-rw-rw-r--. 1 fas fas  1191 Jan 23 07:48 app.js
+drwxrwxr-x. 2 fas fas    17 Jan 23 07:48 bin
+-rw-rw-r--. 1 fas fas   166 Jan 23 07:48 config.js
+[fas@localhost dockerignore]$
+
+[fas@localhost dockerignore]$ ll -a
+total 8
+drwxrwxr-x.  3 fas fas  56 Jan 23 07:51 .
+drwxrwxr-x. 11 fas fas 179 Jan 23 07:47 ..
+-rw-rw-r--.  1 fas fas 240 Jan 23 07:51 Dockerfile
+-rw-rw-r--.  1 fas fas  53 Jan 23 07:50 .dockerignore # Находитсся тут
+drwxrwxr-x.  9 fas fas 188 Jan 23 07:49 src
+

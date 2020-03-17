@@ -1,0 +1,124 @@
+											#####Deploying and Configuring the Elastic Stack#####
+###############
+#Collecting and Shipping Logs with Filebeat#
+###############
+
+cloud_user@fas3c - ELK Master 1
+cloud_user@fas4c - ELK data 1
+cloud_user@fas5c - ELK data 2
+
+# Шаг 1. Download and deploy Filebeat
+[root@fas3c ~]# curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-7.6.1-x86_64.rpm
+[root@fas3c ~]# rpm -vi filebeat-7.6.1-x86_64.rpm
+[root@fas3c ~]# systemctl enable filebeat
+Created symlink from /etc/systemd/system/multi-user.target.wants/filebeat.service to /usr/lib/systemd/system/filebeat.service.
+
+# Шаг 2. Configure Filebeat to connect to Kibana
+[root@fas3c ~]# vi /etc/filebeat/filebeat.yml
+# Раскомментировать и изменить:
+#============================== Kibana =====================================
+host: "172.31.29.149:8080" # Private IP Мастера
+
+# Шаг 3. Configure Filebeat to output to Elasticsearch
+[root@fas3c ~]# vi /etc/filebeat/filebeat.yml
+# Раскомментировать и изменить:
+#================================ Outputs =====================================
+hosts: ["172.31.29.149:9200"] # Private IP Мастера
+username: "elastic"
+password: "changeme" # Так как мы сделали защищенный кластер, то сюда нужно ввести актуальный пароль пользователя
+
+# Шаг 4. Enable the system module
+[root@fas3c ~]# filebeat modules enable system
+Enabled system
+
+# Шаг 5. Set up Filebeat modules
+# We will use the system module in Filebeat to collect, ship, parse, and visualize system logs from each of our playground servers.
+[root@fas3c ~]# filebeat setup # Push the index templates and ingest pipelines to Elasticsearch and the module dashboards to Kibana
+Overwriting ILM policy is disabled. Set `setup.ilm.overwrite:true` for enabling.
+Index setup finished.
+Loading dashboards (Kibana must be running and reachable)
+Loaded dashboards
+Setting up ML using setup --machine-learning is going to be removed in 8.0.0. Please use the ML app instead.
+See more: https://www.elastic.co/guide/en/elastic-stack-overview/current/xpack-ml.html
+Loaded machine learning job configurations
+Loaded Ingest pipelines
+
+# Шаг 6. Start Filebeat
+[root@fas3c ~]# systemctl start filebeat
+[root@fas3c ~]# systemctl status filebeat
+
+# Шаг 7. Проверка
+[root@fas3c ~]# curl localhost:9200/_cat/indices?v -u elastic
+Enter host password for user 'elastic':
+health status index                            uuid                   pri rep docs.count docs.deleted store.size pri.store.size
+green  open   .security-7                      Vtb_n5g7RkWyuGz-8j85Vw   1   1         42            0    222.7kb        108.5kb
+green  open   .kibana_task_manager_1           xRtwUX5fSXaXHunn7o31nA   1   1          2            0     87.6kb         39.8kb
+green  open   ilm-history-1-000001             jZC8T_mLQ_CG0RG5_xRsgw   1   1          6            0     31.3kb         15.6kb
+green  open   .apm-agent-configuration         A7a9LxFTQuqaOpxHJzMFVQ   1   1          0            0       566b           283b
+green  open   filebeat-7.6.1-2020.03.17-000001 CoVpFYTpSMWF1stBGSXE4w   1   1      74833            0     34.2mb         16.8mb # Появился индекс
+green  open   .kibana_1                        S8o3Bxs5TfiGCaYFez8dFw   1   1       1328           51      1.6mb        831.4kb
+
+# Шаг 8. Выполнить тоже самое на всех нодах кластера
+# Обратить внимание, что индекс останется один - filebeat-7.6.1-2020.03.17-000001 CoVpFYTpSMWF1stBGSXE4w
+
+###############
+#Collecting and Shipping System Telemetry with Metricbeat#
+###############
+
+# Шаг 1. Download and deploy Metricbeat
+[root@fas3c ~]# curl -O https://artifacts.elastic.co/downloads/beats/metricbeat/metricbeat-7.6.0-x86_64.rpm
+[root@fas3c ~]# rpm --install metricbeat-7.6.0-x86_64.rpm
+
+# Шаг 2. Configure Metricbeat to connect to Kibana
+[root@fas3c ~]# vi /etc/metricbeat/metricbeat.yml
+# Раскомментировать и изменить:
+#============================== Kibana =====================================
+host: "172.31.29.149:8080" # Private IP Мастера
+
+# Шаг 3. Configure Metricbeat to output to Elasticsearch
+[root@fas3c ~]# vi /etc/metricbeat/metricbeat.yml
+# Раскомментировать и изменить:
+#================================ Outputs =====================================
+hosts: ["172.31.29.149:9200"] # Private IP Мастера
+username: "elastic"
+password: "changeme" # Так как мы сделали защищенный кластер, то сюда нужно ввести актуальный пароль пользователя
+
+# Шаг 4. Configure Metricbeat modules
+[root@fas3c ~]# metricbeat modules list # Список модулей
+Enabled:
+system # Включено по умолчанию в отличие от filebeat
+
+Disabled:
+activemq
+aerospike
+apache
+appsearch
+aws
+azure
+beat
+...
+# Шаг 5. Set up Metricbeat modules
+[root@fas3c ~]# metricbeat setup
+
+# Шаг 6. Start Metricbeat
+[root@fas3c ~]# systemctl start metricbeat
+[root@fas3c ~]# systemctl status metricbeat
+
+# Шаг 7. Проверка
+[root@fas3c ~]# curl localhost:9200/_cat/indices?v -u elastic
+Enter host password for user 'elastic':
+health status index                              uuid                   pri rep docs.count docs.deleted store.size pri.store.size
+green  open   .security-7                        Vtb_n5g7RkWyuGz-8j85Vw   1   1         42            0    222.7kb        108.5kb
+green  open   .kibana_task_manager_1             xRtwUX5fSXaXHunn7o31nA   1   1          2            0     87.6kb         39.8kb
+green  open   ilm-history-1-000001               jZC8T_mLQ_CG0RG5_xRsgw   1   1         21            0     66.5kb         33.2kb
+green  open   .apm-agent-configuration           A7a9LxFTQuqaOpxHJzMFVQ   1   1          0            0       566b           283b
+green  open   metricbeat-7.6.0-2020.03.17-000001 nwim7nALTh-4UZaBr61luw   1   1        504            0        1mb          478kb # Появился индекс
+green  open   filebeat-7.6.1-2020.03.17-000001   CoVpFYTpSMWF1stBGSXE4w   1   1     409881            0    164.8mb         82.4mb
+green  open   .kibana_1                          S8o3Bxs5TfiGCaYFez8dFw   1   1       2447         1042      6.1mb            3mb
+
+###############
+#Analyzing Data with Kibana#
+###############
+# Шаг 1. Connect to Kibana from our local browsers
+# Шаг 2. Use the Metricbeat System dashboards to analyze our system resource usage
+# Шаг 3. Use the Filebeat System dashboards to analyze our system log events

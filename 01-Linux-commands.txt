@@ -1,0 +1,277 @@
+###############
+#Linux команды#
+###############
+fas@fas-Ubuntu:~$ uptime
+fas@fas-Ubuntu:~$ uname -a
+fas@fas-Ubuntu:~$ clear
+
+Ctrl+Alt+F3 # переключение из графического режима в Linux CLI
+Ctrl+Alt+F4 # вернуться обратно
+
+fas@fas-Ubuntu:~$ man -k time # поиск команды по слову "time"
+fas@fas-Ubuntu:~$ man uptime # справка по команде. Навигация как в Vim
+
+# краткое описание команды
+fas@fas-Ubuntu:~$ info uptime
+fas@fas-Ubuntu:~$ whatis uptime 
+
+# поиск, где лежит команда
+fas@fas-Ubuntu:~$ whereis uptime
+fas@fas-Ubuntu:~$ locate uptime
+
+fas@fas-Ubuntu:~$ ping 8.8.8.8
+Ctrl+C # убрать процесс (ping не будет видно в ps)
+Ctrl+Z # переводит процесс ping в спящий режим (ping будет видно в ps)
+fas@fas-Ubuntu:~$ fg # вернуть ping на экран
+
+fas@fas-Ubuntu:~$ pwd # print working directory
+fas@fas-Ubuntu:~$ cd ../.. # два возврата наверх
+fas@fas-Ubuntu:~$ св ~ # в домашнюю директорию
+
+# работа с файлами
+fas@fas-Ubuntu:~$ cat readme.txt
+fas@fas-Ubuntu:~$ more readme.txt # enter - листать дальше
+fas@fas-Ubuntu:~$ less readme.txt  # / - поиск
+
+fas@fas-Ubuntu:~$ touch hello.txt # создать файл (изменить дату)
+fas@fas-Ubuntu:~$ cp hello.txt -v Dir2 # -v показывает, что копирует
+fas@fas-Ubuntu:~$ cp -R Dir1 Dir2 # копировать директорию
+
+# работа с директориями
+fas@fas-Ubuntu:~$ mkdir Dir3
+fas@fas-Ubuntu:~$ mkdir Dir3/Dir5
+fas@fas-Ubuntu:~$ mkdir - p Dir4/Dir5 # создать Dir5, если Dir4 не создано
+fas@fas-Ubuntu:~$ ls -R # рекурсивное отображение
+fas@fas-Ubuntu:~$ mv Dir1 newDir1 # переименование директории
+fas@fas-Ubuntu:~$ rm -R NewDir*
+
+# создание линков
+ln -s # линк на директорию
+ln # создание дубликата файла
+fas@fas-Ubuntu:~$ mkdir Dir4
+fas@fas-Ubuntu:~$ ln -s /home/fas/Dir4 MyLinktoDir4 # создание ссылки на директорию
+fas@fas-Ubuntu:~$ cd MyLinktoDir4 # потом внутри мы увидим все, что в Dir4
+fas@fas-Ubuntu:~$ mv MyLinktoDir4  ~/Desktop/# линк можно перемещать
+fas@fas-Ubuntu:~$ vi file2.txt 
+fas@fas-Ubuntu:~$ ln file2.txt file2duplicate.txt # дубликат файла. Дубликат и оригинал будут меняться и синхронизироваться в реальном времени
+
+# команды: find, cut, sort, wc
+fas@fas-Ubuntu:~$ find /home -name "*.txt" # поиск по имени, сначала указываем где искать, а потом что искать
+fas@fas-Ubuntu:~$ wc linux-history.txt # вывод: 47 1047 7001 | строки слова символы
+fas@fas-Ubuntu:~$ wc -l linux-history.txt # вывод только количества строк
+fas@fas-Ubuntu:~$ wc -w linux-history.txt # вывод только количества слов
+fas@fas-Ubuntu:~$ sort names.txt # сортирует содержимое файла по алфавиту
+fas@fas-Ubuntu:~$ cut -d ">" -f 3 filesdata.txt # разделить строки в файле | в качестве разделителя > | вывести 3 вхождение
+fas@fas-Ubuntu:~$ cut -d ">" -f 3 filesdata.txt | sort  # две команды подрят
+
+# команда grep и регулярные выражения (grep - поиск по содержимому файла)
+fas@fas-Ubuntu:~$ grep linux ./* # ищем слово linux в директории . во всех файлах
+fas@fas-Ubuntu:~$ grep  -i linux ./* # ищем слово linux в директории . во всех файлах + игнорируем Key Sensitive
+fas@fas-Ubuntu:~$ grep .gov mydatafile.doc # ищем слово .gov в файле
+fas@fas-Ubuntu:~$ grep -E "[A-Za-z]*.gov" mydatafile.doc # поиск с использованием RegExp
+fas@fas-Ubuntu:~$ grep -E "[A-Za-z]*.gov" mydatafile.doc | wc # поиск с использованием RegExp + посчитать количкство соответствий
+fas@fas-Ubuntu:~$ grep -E "(kgb.gov|intel.com)" mydatafile.doc # поиск с использованием RegExp
+
+# перенаправление вывода / ввода
+fas@fas-Ubuntu:~$ sort names.txt > names_sorted.txt # обычное перенаправление вывода (перезапись файла)
+fas@fas-Ubuntu:~$ sort names.txt >> names_sorted.txt # обычное перенаправление вывода (добавление в  файл)
+fas@fas-Ubuntu:~$ grep denis /etc/* 2 > errors.txt # перенаправление только ошибок
+fas@fas-Ubuntu:~$ grep denis /etc/* 2 > /dev/null # перенаправление ошибок в несуществующее устройство (dev - device). Это тип заглушки
+fas@fas-Ubuntu:~$ grep denis /etc/* > good.txt 2 > errors.txt # одновременное перенаправление потока вывода и ошибок
+fas@fas-Ubuntu:~$ grep denis /etc/* & > results.txt # одновременное перенаправление потока вывода и ошибок в один файл
+
+# архивирование и сжатие tar, gzip, bzip2, xz, zip
+tar # tape and archive, может работать с директориями
+fas@fas-Ubuntu:~$ tar cf mytar.tar Folder1 # cf - create file <новый архив> <что туда кладем>, f должно быть в конце 
+fas@fas-Ubuntu:~$ tar cvf mytar.tar Folder1 # v - verbose, v не может быть в конце
+fas@fas-Ubuntu:~$ tar tf mytar.tar # t - test, посмотреть содержимое архива
+fas@fas-Ubuntu:~$ tar xvf mytar.tar # x - extract, извлечь файлы из архива
+gzip, bzip2, xz, zip - команды сжатия, работают только с файлами
+fas@fas-Ubuntu:~$ gzip mytar2.tar #  получится файл mytar2.tar.gz меньшего размера
+fas@fas-Ubuntu:~$ gunzip mytar2.tar # распаковать, файл mytar2.tar.gz пропадает
+fas@fas-Ubuntu:~$ bzip2 mytar2.tar.gz #  получится файл mytar2.tar.bz2 еще более меньшего размера, чем mytar2.tar.gz
+fas@fas-Ubuntu:~$ bunzip2 mytar2.tar.bz2 # распаковать, файл mytar2.tar.bz2 пропадает 
+fas@fas-Ubuntu:~$ xz mytar2.tar #  получится файл mytar2.tar.xz меньшего размера, чем mytar2.tar.gz, но большего, чем mytar2.tar.bz2
+fas@fas-Ubuntu:~$ unxz mytar2.tar.xz # распаковать, файл mytar2.tar.xz пропадает
+fas@fas-Ubuntu:~$ tar cvzf myzip.gz Folder1 # create/verbose/zip/file сразу создаст архив  с жатием zip
+fas@fas-Ubuntu:~$ tar cvjf mybzip.bz2 Folder1 # create/verbose/bzip/file сразу создаст архив  с жатием bzip
+fas@fas-Ubuntu:~$ tar cvJf myxz.xz Folder1 # create/verbose/xz/file сразу создаст архив  с жатием xz
+fas@fas-Ubuntu:~$ tar xvzf myzip.gz Folder1 # x - extract, извлечь файлы из архива, файл myzip.gz пропадет
+# zip - для Windows
+fas@fas-Ubuntu:~$ zip -r myzip.zip Folder1 # r - recursive
+fas@fas-Ubuntu:~$ unzip -r myzip.zip # распаковать, файл myzip.zip остается
+
+# процессы и память: top, free, ps
+fas@fas-Ubuntu:~$ top # как Task Manager в Windows
+Shift+P # сортировка по CPU
+Shift+M # сортировка по Memory
+Q # выход
+fas@fas-Ubuntu:~$ free -h # информация о памяти
+fas@fas-Ubuntu:~$ ps # список процессов
+fas@fas-Ubuntu:~$ ps -u denis # список процессов конкретного пользователя
+fas@fas-Ubuntu:~$ ps -aux # самый полный вывод
+fas@fas-Ubuntu:~$ ls /var/log # все логи Linx
+fas@fas-Ubuntu:~$ dmesg | grep sda # ЛОГ ЯДРА LINUX
+
+# редактирование Файлов: vim, pico, nano
+fas@fas-Ubuntu:~$ gedit # notepad в Windows
+fas@fas-Ubuntu:~$ vim test.txt
+fas@fas-Ubuntu:~$ nano test.txt
+fas@fas-Ubuntu:~$ pico test.txt # аналог nano
+
+# типы аккаунтов и важные файлы
+Типы аккаунтов: root, administrator (может использовать sudo), standard 
+fas@fas-Ubuntu:~$ cat /etc/passwd # список пользователей
+denis:x:1001:1001:Denis,,,:/home/denis:/bin/bash
+x - пароль хранится в другом аккаунте
+1001 - userId
+1001 - groupId
+Denis,,, - комментарии
+/home/denis - домашняя директория
+/bin/bash - default shell
+fas@fas-Ubuntu:~$ cat /etc/shadow # список паролей
+fas@fas-Ubuntu:~$ cat /etc/group # список групп и кто в них находится
+fas@fas-Ubuntu:~$ su vasya # su - switch user | превратиться в пользователя vasya
+fas@fas-Ubuntu:~$ su # превратиться в root, не меняя каталог | запросит пароль root
+fas@fas-Ubuntu:~$ sudo <command> # sudo - switch user + do | выполнить команду с привилегиями root | запрашивает пароль текущего пользователя
+fas@fas-Ubuntu:~$ sudo -i # превратиться в root со сменой каталога | запрашивает пароль текущего пользователя
+fas@fas-Ubuntu:~$ sudo -s # превратиться в root без смены каталога | запрашивает пароль текущего пользователя
+fas@fas-Ubuntu:~$ sudo passwd # | сменить пароль
+fas@fas-Ubuntu:~$ whoami # показать, кем мы залогинены
+fas@fas-Ubuntu:~$ id # информация об ученой записи
+fas@fas-Ubuntu:~$ id vasia
+fas@fas-Ubuntu:~$ last # список последних логинов в систему
+fas@fas-Ubuntu:~$ who # кто залогинен в данный момент времени
+fas@fas-Ubuntu:~$ w # более подробный вывод who
+
+# пользователи и группы
+fas@fas-Ubuntu:~$ sudo useradd -m user1 # создать пользователя | m - создать домашний каталог
+fas@fas-Ubuntu:~$ sudo passwd useradd1 # смена пароля пользователю
+fas@fas-Ubuntu:~$ cd /etc/skel/ # директория-скелет с файлами | здесь шаблоны папок для директорий examples.desktop
+fas@fas-Ubuntu:~$ sudo userdel user1 # удалить пользователя, оставив домашний каталог
+fas@fas-Ubuntu:~$ sudo userdel -r user1 # удалить пользователя со всеми его файлами
+fas@fas-Ubuntu:~$ sudo groupadd Programmers # создать группу
+fas@fas-Ubuntu:~$ sudo groupdel Programmers # удалить группу
+fas@fas-Ubuntu:~$ sudo usermod -aG Programmers vasya # добавить пользователя в группу| usermod - user modification | -a - append | G - group
+fas@fas-Ubuntu:~$ sudo deluser vasya Programmers # уалить пользователя из группы
+
+# права доступа и владения файлами и директориями
+- rw- rw- r--
+1) -|d|l файл|директория|линк
+2) rw- для владельца
+3) rw- для группы
+4) r-- всем остальным
+x - исполнять файл | заходить в директорию
+Буквы:
+fas@fas-Ubuntu:~$ sudo chown petya zzz/ # change owner | изменить владельца директории zzz/ на пользователя petya
+fas@fas-Ubuntu:~$ sudo chgrp Programmers test.txt # изменить группу у файла test.txt на Programmers
+fas@fas-Ubuntu:~$ chmod o+r test.txt # change mode others plus read | добавить права на чтение для остальных на файл test.txt
+fas@fas-Ubuntu:~$ chmod g-w test.txt # change mode group minus write
+fas@fas-Ubuntu:~$ chmod g-w,u+x test.txt # change mode group minus write, user plus execute
+fas@fas-Ubuntu:~$ chmod ugo=r test.txt # change mode user,group,others equal r--
+fas@fas-Ubuntu:~$ chmod a=r test.txt # change mode user,group,others (all) equal r--
+Цифры (можно назначать всем сразу: user, group, others):
+r = 4
+w = 2
+x = 1
+rwx = 4+2+1=7
+rw- = 4+2+0=6
+r-x = 4+0+1=5
+r-- = 4+0+0=4
+-wx = 0+2+1=3
+-w- = 0+2+0=2
+--x = 0+0+1=1
+--- = 0+0+0=0
+fas@fas-Ubuntu:~$ chmod 711 test.txt # - rwx --x --x
+
+Если есть привилегии на директорию (например удалять), а на файл нет, то файл можно будет удалить
+s - sticky bit (только на директорию, на файл можно, но бесполезно)
+fas@fas-Ubuntu:~$ sudo chmod o+t MYSHARE/ # добавление sticky bit для директории MYSHARE/ | теперь other не смогут удалять файлы внутри директории | на sudo не распространяется
+fas@fas-Ubuntu:~$ sudo chmod 1777 MYSHARE/ # добавление sticky bit для директории MYSHARE/ | d rwx rwx rwt
+fas@fas-Ubuntu:~$ sudo chmod 0777 MYSHARE/ # удаление sticky bit для директории MYSHARE/ | d rwx rwx rwx
+
+# сетевые команды
+fas@fas-Ubuntu:~$ ifconfig
+fas@fas-Ubuntu:~$ ip address show
+fas@fas-Ubuntu:~$ route # таблица маршрутизации
+fas@fas-Ubuntu:~$ ip route show # таблица маршрутизации с другим выводом
+fas@fas-Ubuntu:~$ ping -c 8.8.8.8 # ping со счетчиком
+fas@fas-Ubuntu:~$ host www.micrsoft.com # сопоставление DNS-имени с IP-адресом
+fas@fas-Ubuntu:~$ dig www.ebay.com # сопоставление DNS-имени с IP-адресом c другим выводом
+fas@fas-Ubuntu:~$ netstat | less # задействованные порты
+fas@fas-Ubuntu:~$ sudo ufw allow 22 # открыть порт
+fas@fas-Ubuntu:~$ sudo apt-get install openssh-server # чтобы коннектиться на другие сервера
+fas@fas-Ubuntu:~$ ssh 192.168.0.1 # подключиться по ssh 
+
+# скачивание и установка программ
+Ubuntu. Программы
+fas@fas-Ubuntu:~$ wget https://adv400.tripod.com/v1.jpg # web get | скачивать из Интернета
+fas@fas-Ubuntu:~$ sudo apt-get install chromium-bsu # скачивание программ
+fas@fas-Ubuntu:~$ whereis chromium-bsu # выяснить, куда установилась программа
+fas@fas-Ubuntu:~$ chromium-bsu # запустить игру
+fas@fas-Ubuntu:~$ sudo apt-get remove chromium-bsu # удаление программ
+fas@fas-Ubuntu:~$ cat /etc/apt/sources.list # список репозиториев
+Ubuntu. Пакеты
+fas@fas-Ubuntu:~$ wget https://adv400.tripod.com/test.deb# скачать deb-пакет
+fas@fas-Ubuntu:~$ sudo dpkg -i test.deb # установить пакет | i - install
+fas@fas-Ubuntu:~$ sudo dpkg -r test.deb # удалить пакет | r - remove
+CentOS. Программы
+fas@fas-CentOS:~$ wget https://adv400.tripod.com/v1.jpg # web get | скачивать из Интернета
+fas@fas-CentOS:~$ sudo yum install chromium-bsu # скачивание программ
+fas@fas-CentOS:~$ whereis chromium-bsu # выяснить, куда установилась программа
+fas@fas-CentOS:~$ chromium-bsu # запустить игру (иногда нужно указать полный путь)
+fas@fas-CentOS:~$ sudo yum remove chromium-bsu # удаление программ
+CentOS. Пакеты
+fas@fas-Ubuntu:~$ wget https://adv400.tripod.com/test.rpm# скачать rpm-пакет
+fas@fas-Ubuntu:~$ sudo rpm -i test.deb # установить пакет | i - install
+fas@fas-Ubuntu:~$ sudo rpm -e test.deb # удалить пакет | e - erase
+
+# изменение имени компьютера и ip-адреса
+fas@fas-Ubuntu:~$ sudo hostname MyLinux
+fas@fas-Ubuntu:~$ vi /etc/hostname
+fas@fas-Ubuntu:~$ vi /etc/hosts # локальный DNS
+fas@fas-Ubuntu:~$ sudo ifconfig eth0 10.10.10.10 netmask 255.0.0.0 # временно поменять ip-адрес
+fas@fas-Ubuntu:~$ vi /etc/network/interfaces
+fas@fas-Ubuntu:~$ sudo ifdown eth0
+fas@fas-Ubuntu:~$ sudo ifup eth0
+
+# ssh-соединение
+fas@fas-Ubuntu:~$ sudo apt-get install openssh-server # на ubuntu надо скачивать службу
+fas@fas-Ubuntu:~$ service ssh status
+fas@fas-Ubuntu:~$ service ssh start
+fas@fas-Ubuntu:~$ w # посмотреть активные соединения
+
+# crontab
+fas@fas-Ubuntu:~$ crontab -e # редактировать
+fas@fas-Ubuntu:~$ crontab -i # посмотреть
+fas@fas-Ubuntu:~$ sudo /var/spool/cron//crontabs/ # список задач каждого пользователя
+fas@fas-Ubuntu:~$ sudo nano /etc/crontab # главная системная таблица Linux (все задания там обычно запускается через root)
+fas@fas-Ubuntu:~$ sudo cat /var/log/syslog | grep CRON # системный лог-файл
+
+# добавление второго диска
+fas@fas-Ubuntu:~$ sudo fdisk -l # вывод информации о всех устройствах
+/dev/sda1 - device, sata disk "a" (a - первый), partition(раздел) 1
+fas@fas-Ubuntu:~$ lsblk # удобный вывод информации о дисках
+добавляем неформатированный жесткий диск 
+	fas@fas-Ubuntu:~$ lsblk # покажет, что появился новый диск sdb
+создадаеем partition в новом диске
+	fas@fas-Ubuntu:~$ sudo cfdisk /dev/sdb # удобный редактор
+	выбрать type: dos
+	создать partition на 10GB
+	тип: primary
+	нажимаем write
+	fas@fas-Ubuntu:~$ lsblk # покажет, что появился новый partition sdb1 на диске sdb
+создаем файловую систему (в нашем случае ntfs) в partition
+	fas@fas-Ubuntu:~$ sudo mkfs.ntfs -f /dev/sdb1
+	в системе появится новый диск
+	на данном этапе диск находится в /media/fas и пропадет после загрузки, так как нет автоматического монтирования
+автоматическое монтирование (mount - присоединять | sudo mount /dev/имя_раздела /точка/монтирования/)
+	fas@fas-Ubuntu:~$ cd /media
+	fas@fas-Ubuntu:~$ mkdir hdd2
+	fas@fas-Ubuntu:~$ sudo chmod 777 hdd2
+	fas@fas-Ubuntu:~$ vi /etc/fstab
+		добавить: /dev/sdb1 /media/hdd2 ntfs default 0 0
+	fas@fas-Ubuntu:~$ sudo mount /media/hdd2
+создание линка на диск (опционально)
+	fas@fas-Ubuntu:~$ ln -s /media/hdd2 ~/Desktop/HDD2
+после перезагрузки диск будет в системе и доступен всем пользователям

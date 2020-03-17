@@ -1,0 +1,826 @@
+						Run Prometheus on Kubernetes
+###############
+#Setting Up Grafana#
+###############
+[root@fas1c prometheus]# cd ..
+[root@fas1c content-kubernetes-prometheus-env]# cd grafana/
+[root@fas1c grafana]# ll
+total 8
+drwxr-xr-x 2 root root  38 Feb 19 06:30 dashboard
+-rw-r--r-- 1 root root 658 Feb 19 06:30 grafana-deployment.yml
+-rw-r--r-- 1 root root 210 Feb 19 06:30 grafana-service.yml
+
+# Шаг 1. Create grafana-deployment.yml. This file will be used to create the Grafana deployment. Be sure to change the password.
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+    component: core
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: grafana
+        component: core
+    spec:
+      containers:
+        - image: grafana/grafana:3.1.1
+          name: grafana
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: password
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+          - name: grafana-persistent-storage
+            mountPath: /var
+      volumes:
+      - name: grafana-persistent-storage
+        emptyDir: {}
+
+[root@fas1c grafana]# kubectl apply -f grafana-deployment.yml
+deployment.extensions/grafana created
+
+[root@fas1c grafana]# kubectl get pods -n monitoring | grep gra # Проверка
+grafana-7448f56976-5rkhr                 1/1       Running   0          33s
+
+# Шаг 2. Create grafana-service.yml. This file will be used to make the pod publicly accessible.
+[root@fas1c grafana]# vi grafana-service.yml
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-service
+  namespace: monitoring
+
+spec:
+  selector:
+    app: grafana
+  type: NodePort
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 8000
+
+[root@fas1c grafana]# kubectl apply -f grafana-service.yml
+service/grafana-service created
+
+[root@fas1c grafana]# kubectl get services -n monitoring | grep gra # Проверка
+grafana-service      NodePort    10.104.158.200   <none>        3000:8000/TCP   13s
+
+Grafana доступна по http://34.223.108.196:8000/ 
+
+###############
+#NodeExporter#
+###############
+# Шаг 1. Create the Prometheus user
+[root@fas1c grafana]# cd ~
+[root@fas1c ~]# adduser prometheus
+
+# Шаг 2. Download Node Exporter
+[root@fas1c ~]# cd /home/prometheus/
+[root@fas1c prometheus]# curl -LO "https://github.com/prometheus/node_exporter/releases/download/v0.16.0/node_exporter-0.16.0.linux-amd64.tar.gz"
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   628  100   628    0     0   5324      0 --:--:-- --:--:-- --:--:--  5367
+100 5152k  100 5152k    0     0  5068k      0  0:00:01  0:00:01 --:--:-- 6465k
+[root@fas1c prometheus]# tar -xvzf node_exporter-0.16.0.linux-amd64.tar.gz
+node_exporter-0.16.0.linux-amd64/
+node_exporter-0.16.0.linux-amd64/LICENSE
+node_exporter-0.16.0.linux-amd64/node_exporter
+node_exporter-0.16.0.linux-amd64/NOTICE
+[root@fas1c prometheus]# ls
+node_exporter-0.16.0.linux-amd64  node_exporter-0.16.0.linux-amd64.tar.gz
+[root@fas1c prometheus]#
+[root@fas1c prometheus]# mv node_exporter-0.16.0.linux-amd64 node_exporter
+[root@fas1c prometheus]# cd node_exporter
+[root@fas1c node_exporter]# ls -la
+total 16524
+drwxr-xr-x 2       3434       3434       53 May 15  2018 .
+drwx------ 3 prometheus prometheus      125 Feb 19 11:41 ..
+-rw-r--r-- 1       3434       3434    11357 May 15  2018 LICENSE
+-rwxr-xr-x 1       3434       3434 16900416 May 15  2018 node_exporter
+-rw-r--r-- 1       3434       3434      463 May 15  2018 NOTICE
+[root@fas1c node_exporter]# chown prometheus:prometheus node_exporter
+[root@fas1c node_exporter]# ls -la
+total 16524
+drwxr-xr-x 2       3434       3434       53 May 15  2018 .
+drwx------ 3 prometheus prometheus      125 Feb 19 11:41 ..
+-rw-r--r-- 1       3434       3434    11357 May 15  2018 LICENSE
+-rwxr-xr-x 1 prometheus prometheus 16900416 May 15  2018 node_exporter
+-rw-r--r-- 1       3434       3434      463 May 15  2018 NOTICE
+
+# Шаг 3. Create a new file to start node_exporter as a service + autoload
+[root@fas1c node_exporter]# vi /etc/systemd/system/node_exporter.service
+[Unit]
+Description=Node Exporter
+
+[Service]
+User=prometheus
+ExecStart=/home/prometheus/node_exporter/node_exporter
+
+[Install]
+WantedBy=default.target
+
+[root@fas1c node_exporter]# systemctl daemon-reload
+[root@fas1c node_exporter]# systemctl enable node_exporter.service
+Created symlink from /etc/systemd/system/default.target.wants/node_exporter.service to /etc/systemd/system/node_exporter.service.
+[root@fas1c node_exporter]# systemctl start node_exporter.service
+
+Нужно сделать на каждой ноде
+
+###############
+#Expression Browser#
+###############
+Expression Browser необходим для выполнения запросов, просмотра конфигурации Prometheus и для Prometheus targets.
+GOMAXPROCS - количество ядер, работающих одновременно
+
+Documentation is in the OneNote
+
+###############
+#Adding a Grafana Dashboard#
+###############
+https://github.com/linuxacademy/content-kubernetes-prometheus-env
+
+Пример dashboard:
+https://github.com/linuxacademy/content-kubernetes-prometheus-env/blob/master/grafana/dashboard/Kubernetes%20All%20Nodes.json
+
+###############
+#Lab 1. Configuring Prometheus to Use Service Discovery
+###############	
+
+
+
+						Application Monitoring
+###############
+#Instrumenting Applications#
+###############
+Дано:
+	Node.JS Application (/metrics) https://github.com/linuxacademy/content-kubernetes-prometheus-app
+	Prometheus
+	Grafana
+	
+Нужно использовать Client Library:
+	для Node.JS это сторонние библиотеки: https://prometheus.io/docs/instrumenting/clientlibs/
+	swagger-stats https://swaggerstats.io/guide/#express
+
+В коде приложения https://github.com/linuxacademy/content-kubernetes-prometheus-app/blob/master/app.js прописано использование swagger-stats:
+	var swStats = require('swagger-stats');
+	app.use(swStats.getMiddleware());
+	
+Анализ возможностей API в приложении https://github.com/linuxacademy/content-kubernetes-prometheus-app/blob/master/routes/index.js:
+/* GET home page. */
+router.get('/', function(req, res, next) {
+  index = {
+    "api_name": "comicbox",
+    "api_version": "0.1.0"
+  }
+  res.json(index);
+});
+
+Для лабораторной работы:
+	Создать отдельный EC2 и запустить на нем приложение:
+		git clone https://github.com/linuxacademy/content-kubernetes-prometheus-app.git
+		npm install
+		npm start
+	По адресу http://localhost:3000 будет доступено приложение 
+	По адресу http://localhost:3000/swagger-stats/ будет доступен WEB-интерфейс swagger-stats c метриками (http://localhost:3000/swagger-stats/metrics) и графиками
+
+
+###############
+#Collecting Metrics from Applications#
+###############	
+https://github.com/linuxacademy/content-kubernetes-prometheus-app
+
+Файл deployment.yml (этот файл для K8s):
+apiVersion: v1
+kind: Service
+metadata:
+  name: comicbox-service
+spec:
+  selector:
+    app: comicbox
+  type: NodePort
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 8001 # Приложение будет доступно по этому порту
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: comicbox
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: comicbox
+      annotations:	# Annotation для Kubernetes, чтобы Prometheus мог выполнять discovery
+            prometheus.io/scrape: "true"
+            prometheus.io/path: 'swagger-stats/metrics'
+            prometheus.io/port: "3000"
+    spec:
+      containers:
+        - name: comicbox
+          image: rivethead42/comicbox
+          ports:
+            - containerPort: 3000
+			
+# Шаг 1. Склонировать репозиторий в котором есть Dockerfilе для создания image и deployment.yml для запуска в K8s			
+[root@fas1c ~]# git clone https://github.com/linuxacademy/content-kubernetes-prometheus-app.git
+[root@fas1c ~]# ll
+total 2097160
+drwxr-xr-x  7 root root       4096 Feb 20 06:28 content-kubernetes-prometheus-app # Новый репозиторий
+drwxr-xr-x  8 root root        112 Feb 19 06:30 content-kubernetes-prometheus-env
+-rw-r--r--. 1 root root        168 Feb 18 14:20 kube-config.yml
+-rw-r--r--. 1 root root 2147483648 Jan  7  2015 swap
+
+# Шаг 2. Создать image на K8s-master
+[root@fas1c ~]# cd content-kubernetes-prometheus-app/
+[root@fas1c content-kubernetes-prometheus-app]# docker build -t rivethead42/comicbox .
+[root@fas1c content-kubernetes-prometheus-app]# docker images
+REPOSITORY                                 TAG                 IMAGE ID            CREATED              SIZE
+rivethead42/comicbox                       latest              63ad8a7eb664        About a minute ago   150MB # Созданный image
+node                                       alpine              b7dc3fe8d4f8        7 hours ago          115MB
+k8s.gcr.io/kube-proxy-amd64                v1.11.3             be5a6e1ecfa6        17 months ago        97.8MB
+k8s.gcr.io/kube-scheduler-amd64            v1.11.3             ca1f38854f74        17 months ago        56.8MB
+k8s.gcr.io/kube-apiserver-amd64            v1.11.3             3de571b6587b        17 months ago        187MB
+k8s.gcr.io/kube-controller-manager-amd64   v1.11.3             a710d6a92519        17 months ago        155MB
+k8s.gcr.io/coredns                         1.1.3               b3b94275d97c        21 months ago        45.6MB
+k8s.gcr.io/etcd-amd64                      3.2.18              b8df3b177be2        22 months ago        219MB
+k8s.gcr.io/pause                           3.1                 da86e6ba6ca1        2 years ago          742kB
+quay.io/coreos/flannel                     v0.9.1-amd64        2b736d06ca4c        2 years ago          51.3MB
+
+[cloud_user@fas2c ~]$ docker images
+REPOSITORY                          TAG                 IMAGE ID            CREATED             SIZE
+quay.io/coreos/kube-state-metrics   latest              ce8abbf0c169        4 weeks ago         32.8MB
+k8s.gcr.io/kube-proxy-amd64         v1.11.3             be5a6e1ecfa6        17 months ago       97.8MB
+prom/prometheus                     v2.2.1              cc866859f8df        23 months ago       113MB
+k8s.gcr.io/pause                    3.1                 da86e6ba6ca1        2 years ago         742kB
+quay.io/coreos/flannel              v0.9.1-amd64        2b736d06ca4c        2 years ago         51.3MB
+weaveworks/watch                    master-5b2a6e5      28f5ac429e55        3 years ago         9.7MB
+grafana/grafana                     3.1.1               2e560760b2db        3 years ago         263MB
+
+# Шаг 3. Запустить image в K8s
+[root@fas1c content-kubernetes-prometheus-app]# kubectl apply -f deployment.yml
+service/comicbox-service created
+deployment.extensions/comicbox created
+
+[root@fas1c content-kubernetes-prometheus-app]# kubectl get pods
+NAME                       READY     STATUS    RESTARTS   AGE
+comicbox-78454f85d-lwqv4   1/1       Running   0          44s
+
+[root@fas1c content-kubernetes-prometheus-app]# kubectl get services
+NAME               TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)         AGE
+comicbox-service   NodePort    10.107.88.250   <none>        3000:8001/TCP   59s
+kubernetes         ClusterIP   10.96.0.1       <none>        443/TCP         1d
+
+Теперь приложение доступно по Public IP K8s-master и по порту 8001
+
+# Шаг 4. Анализ метрик
+Дальнейшая работа с Prometheus и Grafana в OneNote
+
+						PromQL
+###############
+#PromQL Basics#
+###############	
+https://prometheus.io/docs/prometheus/latest/querying/basics/
+
+Примеры для создания запросов:
+	Return all time series with the metric node_cpu_seconds_total: node_cpu_seconds_total
+	Return all time series with the metric node_cpu_seconds_total and the given job and mode labels: node_cpu_seconds_total{job="node-exporter", mode="idle"}
+	Return a whole range of time (in this case 5 minutes) for the same vector, making it a range vector: node_cpu_seconds_total{job="node-exporter", mode="idle"}[5m]
+	Query job that end with -exporter: node_cpu_seconds_total{job=~".*-exporter"}
+	Query job that begins with kube: container_cpu_load_average_10s{job=~"^kube.*"}
+	
+Дальнейшая работа с Prometheus в OneNote
+
+###############
+#PromQL Operations and Functions#
+###############	
+Arithmetic binary operators:
+	\+ (addition)
+	\- (subtraction)
+	\* (multiplication)
+	/ (division)
+	% (modulo)
+	^ (power/exponentiation)
+
+Comparison binary operators:
+	== (equal)
+	!= (not-equal)
+	\> (greater-than)
+	< (less-than)
+	\>= (greater-or-equal)
+	<= (less-or-equal)
+	
+Logical/set binary operators:
+	and (intersection)
+	or (union)
+	unless (complement)
+
+Aggregation operators:
+	sum (calculate sum over dimensions)
+	min (select minimum over dimensions)
+	max (select maximum over dimensions)
+	avg (calculate the average over dimensions)
+	stddev (calculate population standard deviation over dimensions)
+	stdvar (calculate population standard variance over dimensions)
+	count (count number of elements in the vector)
+	count_values (count number of elements with the same value)
+	bottomk (smallest k elements by sample value)
+	topk (largest k elements by sample value)
+	quantile (calculate ?-quantile (0 ? ? ? 1) over dimensions)
+
+Examples:
+	Get the total memory in bytes: node_memory_MemTotal_bytes
+	Get a sum of the total memory in bytes: sum(node_memory_MemTotal_bytes)
+	Get a percentage of total memory used: ((sum(node_memory_MemTotal_bytes) - sum(node_memory_MemFree_bytes) - sum(node_memory_Buffers_bytes) - sum(node_memory_Cached_bytes)) / sum(node_memory_MemTotal_bytes)) * 100
+	Using a function with your query: irate(node_cpu_seconds_total{job="node-exporter", mode="idle"}[5m])
+	Using an operation and a function with your query: avg(irate(node_cpu_seconds_total{job="node-exporter", mode="idle"}[5m]))
+	Grouping your queries: avg(irate(node_cpu_seconds_total{job="node-exporter", mode="idle"}[5m])) by (instance)
+	
+Функции, такие как irate задокументированы тут:
+https://prometheus.io/docs/prometheus/latest/querying/functions/
+
+###############
+#Recording Rules#
+###############	
+# Шаг 1. Структура папок
+[cloud_user@fas1c ~]$ sudo -i
+[sudo] password for cloud_user:
+[root@fas1c ~]# ll
+total 2097160
+drwxr-xr-x  7 root root       4096 Feb 20 06:28 content-kubernetes-prometheus-app
+drwxr-xr-x  8 root root        112 Feb 19 06:30 content-kubernetes-prometheus-env
+-rw-r--r--. 1 root root        168 Feb 18 14:20 kube-config.yml
+-rw-r--r--. 1 root root 2147483648 Jan  7  2015 swap
+[root@fas1c ~]# cd content-kubernetes-prometheus-env/
+[root@fas1c content-kubernetes-prometheus-env]# ll
+total 8
+drwxr-xr-x 2 root root 4096 Feb 19 06:30 alertmanager
+drwxr-xr-x 3 root root   77 Feb 19 08:59 grafana
+drwxr-xr-x 2 root root 4096 Feb 19 07:47 prometheus
+drwxr-xr-x 2 root root  106 Feb 19 06:30 readrules
+drwxr-xr-x 2 root root   22 Feb 19 06:30 redis
+[root@fas1c content-kubernetes-prometheus-env]# cd readrules/
+[root@fas1c readrules]# ll
+total 16
+-rw-r--r-- 1 root root 4371 Feb 19 06:30 prometheus-config-map.yml
+-rw-r--r-- 1 root root 1537 Feb 19 06:30 prometheus-deployment.yml
+-rw-r--r-- 1 root root  889 Feb 19 06:30 prometheus-read-rules-map.yml
+
+# Шаг 2. Изменение предыдущих настроек и добавление новых конфигурационных файлов
+В файле prometheus-config-map.yml добавилось описание rules
+[root@fas1c readrules]# vi prometheus-config-map.yml
+ rule_files:
+ - rules/*_rules.yml
+ 
+    scrape_configs:
+      - job_name: 'node-exporter'
+        static_configs:
+        - targets: ['172.31.17.213:9100', '172.31.28.149:9100'] # Вписать Private IP наших нод, как ранее
+
+В файле prometheus-deployment.yml:	
+[root@fas1c readrules]# vi prometheus-deployment.yml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: prometheus-deployment
+  namespace: monitoring
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: prometheus-server
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.2.1
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus/"
+            - "--web.enable-lifecycle"
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: prometheus-config-volume
+              mountPath: /etc/prometheus/
+            - name: prometheus-storage-volume
+              mountPath: /prometheus/
+            - name: prometheus-read-rules-volume # Новый volume для rules
+              mountPath: /etc/prometheus/rules # Новый volume для rules
+        - name: watch
+          image: weaveworks/watch:master-5b2a6e5
+          imagePullPolicy: IfNotPresent
+          args: ["-v", "-t", "-p=/etc/prometheus", "-p=/var/prometheus", "curl", "-X", "POST", "--fail", "-o", "-", "-sS", "http://localhost:9090/-/reload"]
+          volumeMounts:
+            - name: prometheus-config-volume
+              mountPath: /etc/prometheus
+      volumes:
+        - name: prometheus-config-volume
+          configMap:
+            defaultMode: 420
+            name: prometheus-server-conf
+
+        - name: prometheus-read-rules-volume # Новый volume для rules
+          configMap:
+            defaultMode: 420
+            name: prometheus-read-rules-conf
+
+        - name: prometheus-storage-volume
+          emptyDir: {}
+
+Новый файл prometheus-read-rules-map.yml.
+Синтаксис и описание тут https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/
+[root@fas1c readrules]# vi prometheus-read-rules-map.yml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-read-rules-conf
+  labels:
+    name: prometheus-read-rules-conf
+  namespace: monitoring
+data:
+  node_rules.yml: |-
+    groups:
+    - name: node_rules
+      interval: 10s
+      rules:
+        - record: instance:node_cpu:avg_rate5m
+          expr: 100 - avg(irate(node_cpu_seconds_total{job="node-exporter", mode="idle"}[5m])) by (instance) * 100
+        - record: instance:node_memory_usage:percentage
+          expr: ((sum(node_memory_MemTotal_bytes) - sum(node_memory_MemFree_bytes) - sum(node_memory_Buffers_bytes) - sum(node_memory_Cached_bytes)) / sum(node_memory_MemTotal_bytes)) * 100
+        - record: instance:root:node_filesystem_usage:percentage
+          expr: (node_filesystem_size_bytes{mountpoint="/rootfs"} - node_filesystem_free_bytes{mountpoint="/rootfs"}) /node_filesystem_size_bytes{mountpoint="/rootfs"} * 100
+
+# Шаг 3. Обновление конфигурации K8s 
+[root@fas1c readrules]# kubectl apply -f prometheus-config-map.yml
+configmap/prometheus-server-conf configured
+[root@fas1c readrules]# kubectl apply -f prometheus-read-rules-map.yml
+configmap/prometheus-read-rules-conf created
+[root@fas1c readrules]# kubectl apply -f prometheus-deployment.yml
+deployment.extensions/prometheus-deployment configured
+[root@fas1c readrules]#
+
+[root@fas1c readrules]# kubectl get pod -n monitoring # Проверка того, что все запущено
+NAME                                    READY     STATUS    RESTARTS   AGE
+grafana-7448f56976-5rkhr                1/1       Running   2          1d
+kube-state-metrics-8548c449db-75q76     1/1       Running   2          1d
+prometheus-deployment-8f8d68884-cpwbt   2/2       Running   0          58s
+
+Дальнейшая работа с Prometheus в OneNote
+ 
+						Alerting
+###############
+#Alertmanager#
+###############
+# Шаг 1. Структура папок
+[cloud_user@fas1c ~]$ sudo -i
+[sudo] password for cloud_user:
+[root@fas1c ~]# ls
+content-kubernetes-prometheus-app  content-kubernetes-prometheus-env  kube-config.yml  swap
+[root@fas1c ~]# cd content-kubernetes-prometheus-env/
+[root@fas1c content-kubernetes-prometheus-env]# ll
+total 8
+drwxr-xr-x 2 root root 4096 Feb 19 06:30 alertmanager
+drwxr-xr-x 3 root root   77 Feb 19 08:59 grafana
+drwxr-xr-x 2 root root 4096 Feb 19 07:47 prometheus
+drwxr-xr-x 2 root root  106 Feb 20 13:39 readrules
+drwxr-xr-x 2 root root   22 Feb 19 06:30 redis
+[root@fas1c content-kubernetes-prometheus-env]# cd alertmanager/
+[root@fas1c alertmanager]# ll
+total 36
+-rw-r--r-- 1 root root  510 Feb 19 06:30 alertmanager-configmap.yml
+-rw-r--r-- 1 root root 1141 Feb 19 06:30 alertmanager-depoloyment.yml
+-rw-r--r-- 1 root root  322 Feb 19 06:30 alertmanager-service.yml
+-rw-r--r-- 1 root root 4887 Feb 19 06:30 prometheus-config-map.yml
+-rw-r--r-- 1 root root 1582 Feb 19 06:30 prometheus-deployment.yml
+-rw-r--r-- 1 root root 8923 Feb 19 06:30 prometheus-rules-config-map.yml
+
+# Шаг 2. Create a Config Map that will be used to set up the Alertmanager config file.
+Создать новый канал в slack (описание в OneNote) потом скопировать URL в api_url в файле alertmanager-configmap.yml
+[root@fas1c alertmanager]# vi alertmanager-configmap.yml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-conf
+  labels:
+    name: alertmanager-conf
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'localhost:25'
+      smtp_from: 'alertmanager@linuxacademy.org'
+      smtp_require_tls: false
+    route:
+      receiver: slack_receiver
+    receivers:
+    - name: slack_receiver
+      slack_configs:
+      - send_resolved: true
+        username: 'RiverHead42' #Параметры канала в Slack
+        api_url: 'https://hooks.slack.com/services/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' #Параметры канала в Slack
+        channel: '#alerts' #Параметры канала в Slack
+		
+[root@fas1c alertmanager]# kubectl apply -f alertmanager-configmap.yml
+configmap/alertmanager-conf created
+
+# Шаг 3. Create a deployment file that will be used to stand up the Alertmanager deployment.
+[root@fas1c alertmanager]# vi alertmanager-depoloyment.yml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      containers:
+      - name: prometheus-alertmanager
+        image: prom/alertmanager:v0.14.0
+        args:
+          - --config.file=/etc/config/alertmanager.yml
+          - --storage.path=/data
+          - --web.external-url=/
+        ports:
+          - containerPort: 9093
+        volumeMounts:
+          - mountPath: /etc/config
+            name: config-volume
+          - mountPath: /data
+            name: storage-volume
+      - name: prometheus-alertmanager-configmap-reload
+        image: jimmidyson/configmap-reload:v0.1
+        args:
+          - --volume-dir=/etc/config
+          - --webhook-url=http://localhost:9093/-/reload
+        volumeMounts:
+          - mountPath: /etc/config
+            name: config-volume
+            readOnly: true
+      volumes:
+        - configMap:
+            defaultMode: 420
+            name: alertmanager-conf
+          name: config-volume
+        - emptyDir: {}
+          name: storage-volume
+
+[root@fas1c alertmanager]# kubectl apply -f alertmanager-depoloyment.yml
+deployment.extensions/alertmanager created
+
+[root@fas1c alertmanager]# kubectl get pods -n monitoring # Проверка
+NAME                                    READY     STATUS    RESTARTS   AGE
+alertmanager-5b648dd6fd-27wnq           2/2       Running   0          1m # Появился новый pod
+grafana-7448f56976-5rkhr                1/1       Running   3          1d
+kube-state-metrics-8548c449db-75q76     1/1       Running   3          1d
+prometheus-deployment-8f8d68884-cpwbt   2/2       Running   2          16h
+
+[root@fas1c alertmanager]# vi alertmanager-service.yml
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  labels:
+    app: alertmanager
+  annotations: # Обратить внимание на annotations
+      prometheus.io/scrape: 'true'
+      prometheus.io/port:   '9093'
+spec:
+  selector:
+    app: alertmanager
+  type: NodePort
+  ports:
+  - port: 9093
+    targetPort: 9093
+    nodePort: 8081 # Доступ к alertmanager
+	
+# Шаг 4. Update the Prometheus config to include changes to rules and add the Alertmanager.
+[root@fas1c alertmanager]# vi prometheus-config-map.yml
+По сравнению со старым файлом добавился новый модуль:
+    alerting:
+      alertmanagers:
+      - kubernetes_sd_configs:
+        - role: endpoints
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_service_name]
+          regex: alertmanager
+          action: keep
+        - source_labels: [__meta_kubernetes_namespace]
+          regex: monitoring
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_container_port_number]
+          action: keep
+          regex: 9093
+
+Этот модуль описывает, как Service Discovery находит Alertmanager
+
+Еще добавилось:
+    rule_files:
+      - "/var/prometheus/rules/*_rules.yml"
+      - "/var/prometheus/rules/*_alerts.yml" # Новый Rule-файл
+	  
+[root@fas1c alertmanager]# kubectl apply -f prometheus-config-map.yml
+configmap/prometheus-server-conf configured
+
+# Шаг 5. Create a Config Map that will be used to manage the recording and alerting rules.
+[root@fas1c alertmanager]# vi prometheus-rules-config-map.yml
+Описание в следующем уроке
+[root@fas1c alertmanager]# kubectl apply -f prometheus-rules-config-map.yml
+configmap/prometheus-rules-conf created
+
+# Шаг 6. Update the volumes by the Prometheus deployment.
+[root@fas1c alertmanager]# vi prometheus-deployment.yml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: prometheus-deployment
+  namespace: monitoring
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: prometheus-server
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.2.1
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus/"
+            - "--web.enable-lifecycle"
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: prometheus-config-volume
+              mountPath: /etc/prometheus/
+            - name: prometheus-rules-volume # Новый том
+              mountPath: /var/prometheus/rules
+            - name: prometheus-storage-volume
+              mountPath: /prometheus/
+        - name: watch
+          image: weaveworks/watch:master-5b2a6e5
+          imagePullPolicy: IfNotPresent
+          args: ["-v", "-t", "-p=/etc/prometheus", "-p=/var/prometheus", "curl", "-X", "POST", "--fail", "-o", "-", "-sS", "http://localhost:9090/-/reload"]
+          volumeMounts:
+            - name: prometheus-config-volume
+              mountPath: /etc/prometheus
+            - name: prometheus-rules-volume # Новый том
+              mountPath: /var/prometheus/rules
+      volumes:
+        - name: prometheus-config-volume
+          configMap:
+            defaultMode: 420
+            name: prometheus-server-conf
+        - name: prometheus-rules-volume # Настройки нового тома
+          configMap:
+            name: prometheus-rules-conf
+        - name: prometheus-storage-volume
+          emptyDir: {}
+
+[root@fas1c alertmanager]# kubectl apply -f prometheus-deployment.yml
+
+Продолжение настроек в OneNote
+Выполнить:
+[root@fas1c alertmanager]# kubectl apply -f alertmanager-service.yml
+
+###############
+#Alerting Rules#
+###############
+https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
+# Шаг 1. Изучение alerts rules:
+vi prometheus-rules-config-map.yml
+
+  redis_alerts.yml: |
+    groups:
+    - name: redis_alerts
+      rules:
+      - alert: RedisCacheMissesHigh
+        expr: redis_keyspace_hits_total / (redis_keyspace_hits_total + redis_keyspace_misses_total) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Redis Server {{ $labels.instance }} Cache Misses are high.
+      - alert: RedisRejectedConnectionsHigh
+        expr: redis_connected_clients{} > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis instance {{ $labels.addr }} may be hitting maxclient limit."
+          description: "The Redis instance at {{ $labels.addr }} had {{ $value }} rejected connections during the last 10m and may be hitting the maxclient limit."
+      - alert: RedisServerDown
+        expr: redis_up{app="media-redis"} == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis Server {{ $labels.instance }} is down!
+      - alert: RedisServerGone
+        expr:  absent(redis_up{app="media-redis"})
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: No Redis servers are reporting!
+          description: Werner Heisenberg says - there is no uncertainty about the Redis server being gone.
+
+...
+  redis_rules.yml: |
+    groups:
+    - name: redis_rules
+      rules:
+      - record: redis:command_call_duration_seconds_count:rate2m
+        expr: sum(irate(redis_command_call_duration_seconds_count[2m])) by (cmd, environment)
+      - record: redis:total_requests:rate2m
+        expr: rate(redis_commands_processed_total[2m])
+
+# Шаг 2. Устаовить Redis в K8s
+[root@fas1c alertmanager]# cd ../redis/
+[root@fas1c redis]# vi redis.yml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: media-redis-deployment
+spec:
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+      labels:
+        app: media-redis
+    spec:
+      volumes:
+        - name: host-sys
+          hostPath:
+            path: /sys
+      initContainers:
+        - name: disable-thp
+          image: redis:4.0-alpine
+          volumeMounts:
+            - name: host-sys
+              mountPath: /host-sys
+          command: ["sh", "-c", "echo never > /host-sys/kernel/mm/transparent_hugepage/enabled"]
+      containers:
+      - name: redis
+        image: redis:4.0-alpine
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: 250m
+            memory: 500Mi
+        ports:
+        - containerPort: 6379
+      - name: redis-exporter
+        image: oliver006/redis_exporter:v0.21.1
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        ports:
+        - containerPort: 9121
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9121"
+  name: media-redis-svc
+  labels:
+    app: media-redis
+spec:
+  ports:
+  - port: 6379
+    name: redis
+  - port: 9121
+    name: metrics
+  selector:
+    app: media-redis
+
+[root@fas1c redis]# kubectl apply -f redis.yml
+deployment.extensions/media-redis-deployment created
+service/media-redis-svc created
+
+[root@fas1c redis]# kubectl get pods # Проверка
+NAME                                     READY     STATUS    RESTARTS   AGE
+comicbox-78454f85d-lwqv4                 1/1       Running   2          1d
+media-redis-deployment-d9d46db88-2gj8h   2/2       Running   0          39s
+
+Alert пропадет и Resolve появится в Slack

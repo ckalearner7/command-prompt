@@ -1,0 +1,231 @@
+											#####Infrastructure Monitoring#####
+###############
+#Using the Node Exporter#
+###############
+
+На этом этапе у Prometheus есть только метрики самого себя, Alertmanager и Grafana
+
+			###NODE ONLY###
+# Шаг 1. Create a system user:
+cloud_user@fas4c:~$ sudo useradd --no-create-home --shell /bin/false node_exporter
+
+# Шаг 2. Download the Node Exporter from Prometheus's download page:
+cloud_user@fas4c:~$ cd /tmp/
+cloud_user@fas4c:/tmp$ wget https://github.com/prometheus/node_exporter/releases/download/v0.17.0/node_exporter-0.17.0.linux-amd64.tar.gz
+
+# Шаг 3. Extract its contents; note that the versioning of the Node Exporter may be different:
+cloud_user@fas4c:/tmp$ tar -xvf node_exporter-0.17.0.linux-amd64.tar.gz
+node_exporter-0.17.0.linux-amd64/
+node_exporter-0.17.0.linux-amd64/NOTICE
+node_exporter-0.17.0.linux-amd64/node_exporter
+node_exporter-0.17.0.linux-amd64/LICENSE
+
+# Шаг 4. Move into the newly created directory:
+cloud_user@fas4c:/tmp$ cd node_exporter-0.17.0.linux-amd64/
+
+# Шаг 5. Move the provided binary:
+cloud_user@fas4c:/tmp/node_exporter-0.17.0.linux-amd64$ sudo mv node_exporter /usr/local/bin/
+
+# Шаг 6. Set the ownership:
+cloud_user@fas4c:/tmp/node_exporter-0.17.0.linux-amd64$ sudo chown node_exporter:node_exporter /usr/local/bin/node_exporter
+
+# Шаг 7. Create a systemd service file:
+cloud_user@fas4c:/tmp/node_exporter-0.17.0.linux-amd64$ sudo vim /etc/systemd/system/node_exporter.service
+[Unit]
+Description=Node Exporter
+After=network.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+ExecStart=/usr/local/bin/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+
+# Шаг 8. Start the Node Exporter:
+cloud_user@fas4c:/tmp/node_exporter-0.17.0.linux-amd64$ sudo systemctl daemon-reload
+cloud_user@fas4c:/tmp/node_exporter-0.17.0.linux-amd64$ sudo systemctl start node_exporter
+cloud_user@fas4c:/tmp/node_exporter-0.17.0.linux-amd64$ sudo systemctl status node_exporter
+● node_exporter.service - Node Exporter
+   Loaded: loaded (/etc/systemd/system/node_exporter.service; disabled; vendor preset: enabled)
+   Active: active (running) since Thu 2020-03-05 12:38:35 UTC; 4min 40s ago
+ Main PID: 5527 (node_exporter)
+    Tasks: 4 (limit: 2318)
+   CGroup: /system.slice/node_exporter.service
+           └─5527 /usr/local/bin/node_exporter
+		   
+cloud_user@fas4c:~$ sudo systemctl enable node_exporter
+
+			###PROMETHEUS SERVER ONLY###		   
+# Шаг 9. Add the endpoint to the Prometheus configuration file:
+cloud_user@fas4c:/tmp/node_exporter-0.17.0.linux-amd64$ sudo vim /etc/prometheus/prometheus.yml
+# my global config
+global:
+  scrape_interval:     15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+       - localhost:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: 'prometheus'
+
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+    - targets: ['localhost:9090']
+
+  - job_name: 'grafana'
+    static_configs:
+    - targets: ['localhost:3000']
+
+  - job_name: 'alertmanager'
+    static_configs:
+    - targets: ['localhost:9093']
+
+  - job_name: 'node_exporter' # Добавляем новую цель для Service Discovery
+    static_configs:
+    - targets: ['localhost:9100']
+
+# Шаг 10. Restart Prometheus:
+cloud_user@fas4c:/tmp/node_exporter-0.17.0.linux-amd64$ sudo systemctl restart prometheus
+
+# Шаг 11. Navigate to the Prometheus web UI. Using the expression editor, search for cpu, meminfo, and related system terms to view the newly added metrics.
+После установки Node Exporter на каждую ноду появятся соответствующие записи в Status -> Target
+Еще появится список метрик: node-...
+
+# Шаг 12. Search for node_memory_MemFree_bytes in the expression editor; shorten the time span for the graph to be about 30 minutes of data.
+
+# Шаг 13. Тестирование - Back on the terminal, download and run stress to cause some memory spikes:
+cloud_user@fas4c:/tmp/node_exporter-0.17.0.linux-amd64$ sudo apt-get install stress
+
+# Шаг 14. Тестирование - Wait for about one minute, and then view the graph to see the difference in activity.
+
+###############
+#Networking Metrics#
+###############
+cloud_user@fas3c:~$ cat /proc/net/dev
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+docker0:    1038      15    0    0    0     0          0         0     1752      24    0    0    0     0       0          0
+vethc223e96:    1248      15    0    0    0     0          0         0     2758      37    0    0    0     0       0          0
+  ens5: 1809094    2947    0    0    0     0          0         0   450391    2067    0    0    0     0       0          0
+    lo:   48468     528    0    0    0     0          0         0    48468     528    0    0    0     0       0          0
+
+###############
+#Using cAdvisor to Monitor Containers#
+###############
+
+# Шаг 1. Установить cAdvisor на каждую ноду, где хотим мониторить контейнеры
+sudo docker run \
+   --volume=/:/rootfs:ro \
+   --volume=/var/run:/var/run:ro \
+   --volume=/sys:/sys:ro \
+   --volume=/var/lib/docker/:/var/lib/docker:ro \
+   --volume=/dev/disk/:/dev/disk:ro \
+   --publish=8000:8080 \
+   --detach=true \
+   --name=cadvisor \
+   google/cadvisor:latest
+   
+cloud_user@fas4c:~$ sudo docker run \
+>    --volume=/:/rootfs:ro \
+>    --volume=/var/run:/var/run:ro \
+>    --volume=/sys:/sys:ro \
+>    --volume=/var/lib/docker/:/var/lib/docker:ro \
+>    --volume=/dev/disk/:/dev/disk:ro \
+>    --publish=8000:8080 \
+>    --detach=true \
+>    --name=cadvisor \
+>    google/cadvisor:latest
+
+cloud_user@fas4c:~$ docker ps
+CONTAINER ID        IMAGE                    COMMAND                  CREATED             STATUS              PORTS                    NAMES
+d07c7c53cd11        google/cadvisor:latest   "/usr/bin/cadvisor -…"   8 seconds ago       Up 7 seconds        0.0.0.0:8000->8080/tcp   cadvisor
+
+cloud_user@fas3c:~$ docker ps
+CONTAINER ID        IMAGE                    COMMAND                  CREATED             STATUS              PORTS                    NAMES
+aab2c21c9b1d        google/cadvisor:latest   "/usr/bin/cadvisor -…"   9 seconds ago       Up 7 seconds        0.0.0.0:8000->8080/tcp   cadvisor
+d5bdb8f28fbb        forethought              "node index.js"          2 days ago          Up About an hour    0.0.0.0:80->8080/tcp     ft-app
+
+# Шаг 2. cAdvisor доступен по Public IP:8000 на каждой ноде
+
+# Шаг 3. Добавление настроек в Prometheus
+cloud_user@fas4c:~$ sudo vim /etc/prometheus/prometheus.yml
+# my global config
+global:
+  scrape_interval:     15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+       - localhost:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: 'prometheus'
+
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+    - targets: ['localhost:9090']
+
+  - job_name: 'grafana'
+    static_configs:
+    - targets: ['localhost:3000']
+
+  - job_name: 'alertmanager'
+    static_configs:
+    - targets: ['localhost:9093']
+
+  - job_name: 'node_exporter_self'
+    static_configs:
+    - targets: ['localhost:9100']
+
+  - job_name: 'node_exporter_worker1'
+    static_configs:
+    - targets: ['172.31.31.241:9100']
+
+  - job_name: 'cadvisor_self' #Добавляем для мониторинга контейнеров на сервере Prometheus
+    static_configs:
+    - targets: ['localhost:8000']
+
+  - job_name: 'cadvisor_worker1' #Добавляем для мониторинга контейнеров на сервере c приложением
+    static_configs:
+    - targets: ['172.31.31.241:8000']
+	
+# Шаг 4. Перезапуск Prometheus 	
+cloud_user@fas4c:~$ sudo systemctl restart prometheus
+
+#!!!!!Почему-то не появились метрики контейнера с приложением ft-app с удаленного хоста, но после нескольких перезагрузок заработало
+
+
+

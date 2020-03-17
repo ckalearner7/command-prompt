@@ -1,0 +1,227 @@
+###############
+#Installation and Configuration: CentOS - Part 1#
+###############
+# проверка версии системы
+[root@localhost ~]$ cat /etc/redhat-release 
+CentOS Linux release 7.7.1908 (Core)
+
+# Verify the Package Installation
+[root@localhost ~]# sudo yum install -y yum-utils device-mapper-persistent-data lvm2
+
+# Add the Repository
+[root@localhost ~]#  sudo yum-config-manager --add-repo  https://download.docker.com/linux/centos/docker-ce.repo
+
+# Install Docker
+[root@localhost ~]# sudo yum install docker-ce # Install Docker CE on your server
+
+# Enable and Start Docker
+[root@localhost ~]# sudo systemctl enable docker # Добавить в автозагрузку
+Created symlink from /etc/systemd/system/multi-user.target.wants/docker.service to /usr/lib/systemd/system/docker.service.
+[root@localhost ~]# sudo systemctl start docker # Запустить
+
+# Create Your First Container
+[root@localhost ~]# sudo docker run hello-world # Запустить тестовый docker image "hello-world"
+Unable to find image 'hello-world:latest' locally
+latest: Pulling from library/hello-world
+1b930d010525: Pull complete
+Digest: sha256:d1668a9a1f5b42ed3f46b70b9cb7c88fd8bdc8a2d73509bb0041cf436018fbf5
+Status: Downloaded newer image for hello-world:latest
+
+Hello from Docker!
+This message shows that your installation appears to be working correctly.
+
+# Add a User to the Docker Group
+[fas@localhost ~]$ docker run hello-world # Не хватает прав, для этого нужно добавить пользователя в группу | Пользователю root прав хватает
+docker: Got permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock: Post http://%2Fvar%2Frun%2Fdocker.sock/v1.40/containers/create: dial unix /var/run/docker.sock: connect: permission denied.
+See 'docker run --help'.
+
+[fas@localhost ~]$ groups
+fas
+
+[root@localhost ~]# sudo usermod -a -G docker fas
+
+[fas@localhost ~]$ exit
+
+[fas@localhost ~]$ groups
+fas docker
+
+[fas@localhost ~]$ docker run hello-world # Команда выполняется
+[fas@localhost ~]$ docker version # Посмотреть версию docker
+
+# For Ubuntu installation instructions, go here:
+
+https://github.com/linuxacademy/content-container-essentials-101presentation/blob/master/Docker_Install_Ubuntu.md
+
+###############
+#Installation and Configuration: CentOS - Part 2#
+###############
+# Можно ипользовать готовые скрипты для установки docker-ce
+[root@localhost ~]# wget -q0- https://get.docker.com|sh # скачать и выполнить
+[root@localhost ~]# sudo systemctl enable docker
+[root@localhost ~]# sudo systemctl start docker
+[root@localhost ~]# sudo usermod -a -G docker fas
+[fas@localhost ~]$ exit
+[fas@localhost ~]$ docker version
+
+###############
+#Docker Hub Basics#
+###############
+[fas@localhost ~]$ docker search tomcat # Поиск image
+[fas@localhost ~]$ docker pull tomcat # Скачивание image
+[fas@localhost ~]$ docker images # Просмотр списка images
+[fas@localhost ~]$ docker image ls  # Просмотр списка images
+
+###############
+#Docker Images#
+###############
+[fas@localhost ~]$ docker pull ubuntu:18.04 # чкачать определенную версию image
+[fas@localhost ~]$ docker images --no-trunc # чтобы увидеть полный image ID sha256:ccc6e87d482b79dd1645affd958479139486e47191dfe7a997c862d89cd8b4c0
+
+###############
+#The Dockerfile#
+###############
+[fas@localhost ~]$ mkdir onboarding
+[fas@localhost ~]$ cd onboarding/
+[fas@localhost onboarding]$ vi dockerfile
+	FROM ubuntu:18.04
+	LABEL maintener="test@test.com"
+	RUN apt-get update
+	RUN apt-get install -y python3
+[fas@localhost onboarding]$ docker build . # Создание Image из DockerFile
+	Step 1/4 : FROM ubuntu:18.04
+	Step 2/4 : LABEL maintener="test@test.com"
+	Step 3/4 : RUN apt-get update
+	Step 4/4 : RUN apt-get install -y python3
+	Successfully built d8f0fa899d8e
+[fas@localhost onboarding]$ docker build -t test:v1 . # Создание Image из DockerFile с указанием имени и тэга
+[fas@localhost onboarding]$ docker build  --no-cache -t test:v1 . #Пересобрать заново
+
+###############
+#Running Containers#
+###############
+[fas@localhost ~]$ docker container run hello-world # Запуск контейнера по имени image
+
+[fas@localhost ~]$ docker container run -it test # Неправильно запускать без тэга
+Unable to find image 'test:latest' locally
+
+[fas@localhost ~]$ docker container run -it test:v1 # Запуск контейнера по имени image c тэгом (-it - интерактивно)
+root@f5b885f57b90:/# cat /etc/issue
+Ubuntu 18.04.3 LTS \n \l
+root@f5b885f57b90:/# python3
+>>> exit()
+root@f5b885f57b90:/# apt-get install -y vim
+root@f5b885f57b90:/# vi hello-world.py
+root@f5b885f57b90:/# python3 hello-world.py
+Hello World!
+
+###############
+#The Container Lifecycle#
+###############
+[fas@localhost ~]$ docker container run -it ubuntu:18.04
+root@deb20ebff67f:/#
+
+[fas@localhost ~]$ docker ps # Вывод информации о запущенных образах (в параллельном окне)
+CONTAINER ID        IMAGE               COMMAND             CREATED              STATUS              PORTS               NAMES
+deb20ebff67f        ubuntu:18.04        "/bin/bash"         About a minute ago   Up About a minute                       stupefied_perlman
+
+[fas@localhost ~]$ docker ps -a
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS                      PORTS               NAMES
+deb20ebff67f        ubuntu:18.04        "/bin/bash"         5 minutes ago       Exited (0) 23 seconds ago                       stupefied_perlman
+
+[fas@localhost ~]$ docker container start deb20ebff67f # Стартуем контаинер, который уже запускался на хосте по CONTAINER ID
+
+[fas@localhost ~]$ docker attach deb20ebff67f # Зайти внутрь запущенного контейнера по CONTAINER ID
+root@deb20ebff67f:/#
+root@deb20ebff67f:/# exit # Если выйти интерактивно, то контейнер остановится
+
+###############
+#Image and Container Management#
+###############
+[fas@localhost ~]$ docker ps # Показать запущенные container
+[fas@localhost ~]$ docker ps -a # Показать container, которые когда-либо были запущены
+[fas@localhost ~]$ docker images # Просмотр списка images
+[fas@localhost ~]$ docker container rm deb20ebff67f # Удалить контейнер по ID
+[fas@localhost ~]$ docker container rm epic_rhodes # # Удалить контейнер по имени
+[fas@localhost ~]$ docker rmi fce289e99eb9 # Удалить image (СНАЧАЛА УДАЛИТЬ ВСЕ КОНТЕЙНЕРЫ ЭТОГО IMAGE)
+Untagged: hello-world:latest
+Untagged: hello-world@sha256:d1668a9a1f5b42ed3f46b70b9cb7c88fd8bdc8a2d73509bb0041cf436018fbf5
+Deleted: sha256:fce289e99eb9bca977dae136fbe2a82b6b7d4c372474c9235adc1741675f587e
+Deleted: sha256:af0b15c8625bb1938f1d7b17081031f649fd14e6b233688eea3c5483994a66a3
+# Нельзя удалить image от которго зависит другой image
+[fas@localhost ~]$ docker login # Залогиниться на Docker Hub
+[fas@localhost ~]$ docker tag d8f0fa899d8e ellopunk/onboarding:v1 # Изменить тэг и имя image
+[fas@localhost ~]$ docker push ellopunk/onboarding:v1 # Отправить image на Docker Hub
+
+###############
+#Docker Container Ports#
+###############
+[fas@localhost ~]$ docker container run -d nginx # Запустить в фоновом режиме и скачать, если есть
+[fas@localhost ~]$ docker image history ubuntu:18.04 # История изменений в image
+IMAGE               CREATED             CREATED BY                                      SIZE                COMMENT
+ccc6e87d482b        4 days ago          /bin/sh -c #(nop)  CMD ["/bin/bash"]            0B
+<missing>           4 days ago          /bin/sh -c mkdir -p /run/systemd && echo 'do…   7B
+<missing>           4 days ago          /bin/sh -c set -xe   && echo '#!/bin/sh' > /…   745B
+<missing>           4 days ago          /bin/sh -c [ -z "$(apt-get indextargets)" ]     987kB
+<missing>           4 days ago          /bin/sh -c #(nop) ADD file:08e718ed0796013f5…   63.2MB
+
+[fas@localhost ~]$ docker ps
+CONTAINER ID        IMAGE               COMMAND             CREATED              STATUS              PORTS               NAMES
+24de3ae79680        ubuntu:18.04        "/bin/bash"         About a minute ago   Up About a minute                       xenodochial_wescoff
+[fas@localhost ~]$ docker container inspect 24de3ae79680 | grep IPAdd # Нахождение информации о контейнере по CONTAINER ID 
+            "SecondaryIPAddresses": null,
+            "IPAddress": "172.17.0.2",
+                    "IPAddress": "172.17.0.2",
+					
+[fas@localhost ~]$ elinks 172.17.0.2 # Команда для проверки, что сервис работает на порту
+[fas@localhost ~]$ docker run -d -p 1234:8080 tomcat # -d = demon | 1234 - внешний порт, 8080 - порт в контейнере
+
+###############
+#Docker Container Volumes#
+###############
+https://docs.docker.com/storage/volumes/
+[fas@localhost ~]$ docker volume ls # Показать список томов
+[fas@localhost ~]$ docker volume create devvolume # Создать том
+[fas@localhost ~]$ docker volume inspect devvolume # Показать характеристики тома
+[
+    {
+        "CreatedAt": "2020-01-20T07:03:48-05:00",
+        "Driver": "local",
+        "Labels": {},
+        "Mountpoint": "/var/lib/docker/volumes/devvolume/_data",
+        "Name": "devvolume",
+        "Options": {},
+        "Scope": "local"
+    }
+]
+[fas@localhost ~]$ docker container run -d --name devcont --mount source=devvolume,target=/app httpd # Примонтировать том к контейнеру на основе image = httpd | через команду mount
+
+[fas@localhost ~]$ docker container inspect devcont # Получить информацию о контейнере
+...
+ "Mounts": [
+            {
+                "Type": "volume",
+                "Name": "devvolume",
+                "Source": "/var/lib/docker/volumes/devvolume/_data",
+                "Destination": "/app",
+                "Driver": "local",
+                "Mode": "z",
+                "RW": true,
+                "Propagation": ""
+            }
+        ],
+...
+
+[fas@localhost ~]$ docker container exec -it devcont sh # Выполнить команду в контейтере (sh - shell)
+# ls
+bin  build  cgi-bin  conf  error  htdocs  icons  include  logs  modules
+# ls /
+app  bin  boot  dev  etc  home  lib  lib64  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
+# echo "Hello!" >> /app/hello.txt # Создать файл в какталоге /app, который примонтирован через devcont
+
+[root@localhost ~]# ls /var/lib/docker/volumes/devvolume/_data/ # Тогда файл появится на основном хосте
+hello.txt
+
+[fas@localhost ~]$ docker container run -d --name devcont2 -v devvolume:/app httpd # Примонтировать том к контейнеру на основе image = httpd | через команду volume
+
+# Если удалить контейнер, информация в томе останется
+

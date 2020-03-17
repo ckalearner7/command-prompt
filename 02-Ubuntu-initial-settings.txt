@@ -1,0 +1,88 @@
+###############
+#SSH#
+###############
+fas@fas-Ubuntu:~$ sudo apt-get install ssh
+fas@fas-Ubuntu:~$ sudo service ssh start
+fas@fas-Ubuntu:~$ systemctl status ssh
+
+###############
+#SSH-KEYS#
+###############
+fas@fas-Ubuntu:~$ mv id_rsa ~/.ssh/
+fas@fas-Ubuntu:~$ mv id_rsa.pub ~/.ssh/
+fas@fas-Ubuntu:~$ ls -la ~/.ssh/
+fas@fas-Ubuntu:~$ chmod 400 ~/.ssh/id_rsa
+
+###############
+#GIT#
+###############
+fas@fas-Ubuntu:~$ sudo apt-get install git
+fas@fas-Ubuntu:~$ git --version
+fas@fas-Ubuntu:~$ git config --global user.name "FAS"
+fas@fas-Ubuntu:~$ git config --global user.email "fas@fas.com"
+fas@fas-Ubuntu:~$ git config -l
+
+###############
+#PYTHON & PYTHON3#
+###############
+fas@fas-Ubuntu:~$ sudo apt update
+
+fas@fas-Ubuntu:~$ sudo apt install python
+fas@fas-Ubuntu:~$ python --version
+fas@fas-Ubuntu:~$ sudo apt install python-pip
+fas@fas-Ubuntu:~$ pip --version
+
+fas@fas-Ubuntu:~$ sudo apt install python3
+fas@fas-Ubuntu:~$ python3 --version
+fas@fas-Ubuntu:~$ sudo apt install python3-pip
+fas@fas-Ubuntu:~$ pip3 --version
+
+###############
+#AWS CLI#
+###############
+fas@fas-Ubuntu:~$ sudo apt-get install awscli
+fas@fas-Ubuntu:~$ aws --version
+fas@fas-Ubuntu:~$ fas@aws configure --profile tgw
+fas@fas-Ubuntu:~$ aws configure --profile do
+fas@fas-Ubuntu:~$ aws configure #Для default-аккаунта
+
+###############
+#TERRAFORM#
+###############
+fas@fas-Ubuntu:~$ mkdir Distr
+fas@fas-Ubuntu:~$ cd Distr/
+fas@fas-Ubuntu:~/Distr$ mkdir terraform
+fas@fas-Ubuntu:~/Distr$ cd terraform/
+fas@fas-Ubuntu:~/Distr/terraform$ wget https://releases.hashicorp.com/terraform/0.12.14/terraform_0.12.14_linux_amd64.zip
+fas@fas-Ubuntu:~/Distr/terraform$ unzip terraform_0.12.14_linux_amd64.zip
+fas@fas-Ubuntu:~/Distr/terraform$ sudo mv terraform /bin/
+fas@fas-Ubuntu:~/Distr/terraform$ terraform --version
+
+###############
+#ATOM#
+###############
+fas@fas-Ubuntu:~/Distr/terraform$ cd ..
+fas@fas-Ubuntu:~/Distr$ sudo wget -qO - https://packagecloud.io/AtomEditor/atom/gpgkey | sudo apt-key add -
+fas@fas-Ubuntu:~/Distr$ sudo sh -c 'echo "deb [arch=amd64] https://packagecloud.io/AtomEditor/atom/any/ any main" > /etc/apt/sources.list.d/atom.list'
+fas@fas-Ubuntu:~/Distr$ sudo apt-get update
+fas@fas-Ubuntu:~/Distr$ sudo apt-get install atom
+
+Atom Extensions:
+terraform-fmt
+language-terraform
+
+###############
+#VS STUDIO CODE#
+###############
+VSCode Extensions:
+Python
+Jinja
+Git History
+GitLens
+Terraform
+
+###############
+#UPDATE#
+###############
+fas@fas-Ubuntu:~$ sudo apt-get update
+

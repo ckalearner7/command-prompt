@@ -1,0 +1,692 @@
+											#####Labs#####
+###############
+#Setting Up Prometheus and Adding Endpoints#
+###############
+
+#####Set up Prometheus.#####
+# Шаг 1. Create a user for Prometheus:
+sudo useradd --no-create-home --shell /bin/false prometheus
+
+# Шаг 2. Create the needed directories:
+sudo mkdir /etc/prometheus
+sudo mkdir /var/lib/prometheus
+
+# Шаг 3. Set the ownership of the /var/lib/prometheus directory:
+sudo chown prometheus:prometheus /var/lib/prometheus
+
+# Шаг 4. Download Prometheus:
+cd /tmp/
+wget https://github.com/prometheus/prometheus/releases/download/v2.7.1/prometheus-2.7.1.linux-amd64.tar.gz
+
+# Шаг 5. Extract the files:
+tar -xvf prometheus-2.7.1.linux-amd64.tar.gz
+
+# Шаг 6. Move the configuration file and set the owner to the prometheus user:
+cd prometheus-2.7.1.linux-amd64/
+sudo mv console* /etc/prometheus
+sudo mv prometheus.yml /etc/prometheus
+sudo chown -R prometheus:prometheus /etc/prometheus
+
+# Шаг 7. Move the binaries and set the owner:
+sudo mv prometheus /usr/local/bin/
+sudo mv promtool /usr/local/bin/
+sudo chown prometheus:prometheus /usr/local/bin/prometheus
+sudo chown prometheus:prometheus /usr/local/bin/promtool
+
+# Шаг 8. Create the service file:
+sudo $EDITOR /etc/systemd/system/prometheus.service
+# Add:
+[Unit]
+Description=Prometheus
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/usr/local/bin/prometheus \
+    --config.file /etc/prometheus/prometheus.yml \
+    --storage.tsdb.path /var/lib/prometheus/ \
+    --web.console.templates=/etc/prometheus/consoles \
+    --web.console.libraries=/etc/prometheus/console_libraries
+
+[Install]
+WantedBy=multi-user.target
+
+# Save and exit.
+
+# Шаг 9. Start Prometheus and make sure it automatically starts on boot:
+sudo systemctl start prometheus
+sudo systemctl enable prometheus
+
+#####Set up Alertmanager.#####
+# Шаг 1. Create the alertmanager system user:
+cd ~
+sudo useradd --no-create-home --shell /bin/false alertmanager
+
+# Шаг 2. Create needed directories:
+sudo mkdir /etc/alertmanager
+
+# Шаг 3. Download Alertmanager
+cd /tmp/
+wget https://github.com/prometheus/alertmanager\
+/releases/download/v0.16.1/alertmanager-0.16.1.linux-amd64.tar.gz
+
+# Шаг 4. Extract the files:
+tar -xvf alertmanager-0.16.1.linux-amd64.tar.gz
+cd alertmanager-0.16.1.linux-amd64/
+
+# Шаг 5. Move the binaries:
+sudo mv alertmanager /usr/local/bin/
+sudo mv amtool /usr/local/bin/
+
+# Шаг 6. Set the ownership of the binaries:
+sudo chown alertmanager:alertmanager /usr/local/bin/alertmanager
+sudo chown alertmanager:alertmanager /usr/local/bin/amtool
+
+# Шаг 7. Move the configuration file into the /etc/alertmanager directory:
+sudo mv alertmanager.yml /etc/alertmanager/
+
+# Шаг 8. Set the ownership of the /etc/alertmanager directory:
+sudo chown -R alertmanager:alertmanager /etc/alertmanager/
+
+# Шаг 9. Create the alertmanager.service file for systemd:
+sudo $EDITOR /etc/systemd/system/alertmanager.service
+
+[Unit]
+Description=Alertmanager
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=alertmanager
+Group=alertmanager
+Type=simple
+WorkingDirectory=/etc/alertmanager/
+ExecStart=/usr/local/bin/alertmanager \
+    --config.file=/etc/alertmanager/alertmanager.yml
+
+[Install]
+WantedBy=multi-user.target
+
+# Save and exit.
+
+# Шаг 10. Stop Prometheus, then update the Prometheus configuration file to use Alertmanager:
+sudo systemctl stop prometheus
+sudo $EDITOR /etc/prometheus/prometheus.yml
+
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - localhost:9093
+
+# Шаг 11. Reload systemd, then start the prometheus and alertmanager services:
+sudo systemctl start prometheus
+sudo systemctl start alertmanager
+
+# Шаг 12. Make sure alertmanager starts on boot:
+sudo systemctl enable alertmanager
+
+#####Set up Grafana.#####
+Use the grafana server.
+
+# Шаг 1. Install the prerequisite package:
+sudo apt-get install libfontconfig
+
+# Шаг 2. Download and install Grafana using the .deb package provided on the Grafana download page:
+cd /tmp/
+wget https://dl.grafana.com/oss/release/grafana_5.4.3_amd64.deb
+sudo dpkg -i grafana_5.4.3_amd64.deb
+
+# Шаг 3. Start Grafana:
+sudo systemctl start grafana-server
+
+# Шаг 4. Ensure Grafana starts at boot:
+sudo systemctl enable grafana-server
+
+# Шаг 5. Access Grafana's web UI by going to IPADDRESS:3000.
+
+# Шаг 6. Log in with the username admin and the password admin. Reset the password when promted.
+
+# Шаг 7. Click Add data source on the home page.
+
+# Шаг 8. Select Prometheus.
+
+# Шаг 9. Set the URL to http://MONITORINGIP:9090
+
+# Шаг 10. Click Save & Test
+
+#####Add Alertmanager and Grafana endpoints to Prometheus.#####
+Use the monitoring server.
+
+# Шаг 1. Open the Prometheus configuration file:
+sudo $EDITOR /etc/prometheus/prometheus.yml
+
+# Шаг 2. Add the Alertmanager endpoint:
+   - job_name: 'alertmanager'
+     static_configs:
+     - targets: ['localhost:9093']
+
+# Шаг 3. Add the Grafana endpoint:
+   - job_name: 'grafana'
+     static_configs:
+     - targets: ['GRAFANAIP:3000']
+	 
+# Шаг 4. Save and exit.
+
+# Шаг 5. Restart Prometheus:
+sudo systemctl restart prometheus
+
+# Шаг 6. Check that the endpoint exist on the Targets page on the Prometheus web UI.
+
+###############
+#Monitoring Infrastructure and Containers with Prometheus#
+###############
+
+#####Set up the Node Exporter.#####
+Work on the application server.
+
+# Шаг 1. Create a system user:
+$ sudo useradd --no-create-home --shell /bin/false node_exporter
+
+# Шаг 2. Download the Node Exporter from Prometheus's download page:
+$ cd /tmp/
+$ wget https://github.com/prometheus/node_exporter\
+/releases/download/v0.17.0/node_exporter-0.17.0.linux-amd64.tar.gz
+
+# Шаг 3. Extract its contents:
+$ tar -xvf node_exporter-0.17.0.linux-amd64.tar.gz
+
+# Шаг 4. Move into the newly-created directory:
+$ cd node_exporter-0.17.0.linux-amd64/
+
+# Шаг 5. Move the provided binary:
+$ sudo mv node_exporter /usr/local/bin/
+
+# Шаг 6. Set the ownership:
+$ sudo chown node_exporter:node_exporter /usr/local/bin/node_exporter
+
+# Шаг 7. Create a systemd service file:
+$ sudo $EDITOR /etc/systemd/system/node_exporter.service
+
+[Unit]
+Description=Node Exporter
+After=network.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+ExecStart=/usr/local/bin/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+
+# Save and exit when done.
+
+# Шаг 8. Start the Node Exporter:
+$ sudo systemctl start node_exporter
+
+#####Set up cAdvisor.#####
+Work on the application server.
+
+# Шаг 1. Launch cAdvisor:
+$ sudo docker run \
+  --volume=/:/rootfs:ro \
+  --volume=/var/run:/var/run:ro \
+  --volume=/sys:/sys:ro \
+  --volume=/var/lib/docker/:/var/lib/docker:ro \
+  --volume=/dev/disk/:/dev/disk:ro \
+  --publish=8000:8080 \
+  --detach=true \
+  --name=cadvisor \
+  google/cadvisor:latest
+
+# Шаг 2. List available containers to confirm it's working:
+$ docker ps
+
+#####Add the new endpoints to Prometheus.#####
+Work on the monitoring server.
+
+# Шаг 1. Open the Prometheus configuration file:
+$ sudo $EDITOR /etc/prometheus/prometheus.yml
+
+# Шаг 2. Add the Node Exporter and cAdvisor endpoints:
+
+- job_name: 'node_exporter'
+  static_configs:
+  - targets: ['APPLICATIONHOST:9100']
+- job_name: 'cadvisor'
+  static_configs:
+  - targets: ['APPLICATIONHOST:8000']
+
+# Save and exit.
+
+# Шаг 3. Restart Prometheus:
+$ sudo systemctl restart prometheus
+
+# Шаг 4. Check the Targets page on the web UI to ensure the endpoints are working.
+
+###############
+#Application Monitoring with Prometheus#
+###############
+# Forethought, a task-tracking application written in Node.js.
+
+#####Описание#####
+General
+	All tasks must have the prefix forethought_.
+	A /metrics endpoint needs to be exposed.
+	Enable the collection of default metrics.
+	When finished, the application needs to be reimaged and Dockerized.
+	Add the new applicaton as an endpoint for Prometheus.
+
+Metrics
+forethought_tasks_added
+	Counter
+	Tracks the number of added tasks
+
+forethought_tasks_complete
+	Counter
+	Tracks the number of completed tasks
+
+forethought_current_tasks
+	Gauge
+	Tracks the amount of ACTIVE, INCOMPLETE tasks
+	Goes up when a task is added
+	Goes down when a task is completed
+
+forethought_response_time_summary
+	Summary
+	Observes the response time of the application
+
+forethought_response_time_histogram
+	Histrogram
+	Observes the response time of the application
+	Buckets: 0.1, 0.25, 0.5, 1, 2.5, 5, 10
+
+#####Выполнение#####
+
+# Шаг 1. Add the Prometheus Client Library and Collect Default Metrics
+ # Шаг 1.1 In the Application server terminal, move into the forethought directory:
+	cd forethought
+
+ # Шаг 1.2 Install the prom-client via npm, Node.js's package manager:
+	npm install prom-client --save
+
+ # Шаг 1.3 Open the index.js file, where we'll be adding all of our metrics code:
+	$EDITOR index.js
+
+ # Шаг 1.4 Require the use of the prom-client by adding it to our variable list:
+	 var express = require('express');
+	 var bodyParser = require('body-parser');
+	 var app = express();
+	 const prom = require('prom-client');
+
+	# With prom being the name we'll use when calling the client library.
+
+ # Шаг 1.5 Enable default metrics scraping:
+	const collectDefaultMetrics = prom.collectDefaultMetrics;
+	collectDefaultMetrics({ prefix: 'forethought_' });
+
+ # Шаг 1.6 Use Express to create the /metrics endpoint and call in the Prometheus data:
+
+	app.get('/metrics', function (req, res) {
+		res.set('Content-Type', prom.register.contentType);
+		res.end(prom.register.metrics());
+	});
+
+# Шаг 2. Add the forethought_tasks_added Metric
+ # Шаг 2.1 Define the metric:
+
+ // Metric Definitions
+
+ const tasksadded = new prom.Counter({
+   name: 'forethought_tasks_added',
+   help: 'The number of items added to the to-do list, total'
+ });
+
+ # Шаг 2.2 Call the new metric in the addtask post function so it increases by one every time the function is called while adding a task:
+
+ // add a task
+ app.post("/addtask", function(req, res) {
+   var newTask = req.body.newtask;
+   task.push(newTask);
+   res.redirect("/");
+   tasksadded.inc();
+ });
+
+# Шаг 3. Add the forethought_tasks_complete Metric
+ # Шаг 3.1 Define the metric:
+
+ const tasksdone = new prom.Counter({
+   name: 'forethought_tasks_complete',
+   help: 'The number of items completed'
+ });
+
+ # Шаг 3.2 Call the new metric in the /removetask post function so it increases by one every time the function is called:
+
+ // remove a task
+ app.post("/removetask", function(req, res) {
+   var completeTask = req.body.check;
+   if (typeof completeTask === "string") {
+     complete.push(completeTask);
+     task.splice(task.indexOf(completeTask), 1);
+   }
+   else if (typeof completeTask === "object") {
+     for (var i = 0; i < completeTask.length; i++) {
+       complete.push(completeTask[i]);
+       task.splice(task.indexOf(completeTask[i]), 1);
+       tasksdone.inc()
+     }
+   }
+   res.redirect("/");
+ });
+
+# Шаг 4 Add the forethought_current_tasks Metric
+ # Шаг 4.1 Define the metric:
+
+ const taskgauge = new prom.Gauge({
+   name: 'forethought_current_tasks',
+   help: 'Amount of incomplete tasks'
+ });
+
+ # Шаг 4.2 Add an increase to the /addtask method:
+
+ // add a task
+ app.post("/addtask", function(req, res) {
+   var newTask = req.body.newtask;
+   task.push(newTask);
+   res.redirect("/");
+   tasksadded.inc();
+   taskgauge.inc();
+ });
+
+ # Шаг 4.3 Add a decrease to the /removetask method:
+
+ // remove a task
+ app.post("/removetask", function(req, res) {
+   var completeTask = req.body.check;
+   if (typeof completeTask === "string") {
+     complete.push(completeTask);
+     task.splice(task.indexOf(completeTask), 1);
+   }
+   else if (typeof completeTask === "object") {
+     for (var i = 0; i < completeTask.length; i++) {
+       complete.push(completeTask[i]);
+       task.splice(task.indexOf(completeTask[i]), 1);
+       tasksdone.inc();
+       taskgauge.dec();
+     }
+   }
+   res.redirect("/");
+ });
+
+ # Save and exit.
+
+# Шаг 5. dd the forethought_response_time_summary Metric
+ # Шаг 5.1 Add the response-time module:
+
+ npm install response-time --save
+
+ # Шаг 5.2 Reopen the index.js file.
+
+ # Шаг 5.3 Define the metric:
+
+ const responsetimesumm = new prom.Summary ({
+   name: 'forethought_response_time_summary',
+   help: 'Latency in percentiles',
+ });
+
+ # Шаг 5.4 Add response-time:
+
+ var responseTime = require('response-time');
+
+ # Шаг 5.5 Write the code to retrieve the response time:
+
+ // tracking response time
+
+ app.use(responseTime(function (req, res, time) {
+   responsetimesumm.observe(time);
+ }));
+
+# Шаг 6. Add the forethought_response_time_histogram Metric
+ # Шаг 6.1 Define the metric:
+
+ const responsetimehist = new prom.Histogram ({
+   name: 'forethought_response_time_histogram',
+   help: 'Latency in history form',
+   buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+ });
+
+ # Шаг 6.2 Call the histogram in the existing response-time code:
+
+ app.use(responseTime(function (req, res, time) {
+   responsetimesumm.observe(time);
+   responsetimehist.observe(time);
+ }));
+
+# Шаг 7. Redeploy the Application
+ # Шаг 7.1 Stop the current Docker container for our application:
+ docker stop ft-app
+
+ # Шаг 7.2 Remove the container:
+ docker rm ft-app
+
+ # Шаг 7.3 Remove the image:
+ docker image rm forethought
+ 
+ # Шаг 7.4 Rebuild the image:
+ docker build -t forethought .
+
+ # Шаг 7.5 Deploy the new container:
+ docker run --name ft-app -p 80:8080 -d forethought
+
+ # Шаг 7.6 Switch to the Monitoring server terminal.
+
+ # Шаг 7.7 Add our application endpoint to Prometheus (replacing PRIVATE_IP with the private IP for the Application server listed on the lab page):
+
+ sudo $EDITOR /etc/prometheus/prometheus.yml
+
+   - job_name: 'forethought'
+     static_configs:
+     - targets: ['PRIVATE_IP:80']
+
+ # Save and exit.
+
+ # Шаг 7.8 Restart Prometheus:
+ sudo systemctl restart prometheus
+
+###############
+#Using Alertmanager with Prometheus#
+###############
+
+#####Описание#####
+Before you set up your Alertmanager routes, craft a test alert the triggers whenever more than 25% of our forethought endpoints are down. Give it the following labels:
+	severity: critical
+	team: devops
+
+And ensure the "for" time is set to 1 minute. Save the rule to a file called rules.yml in /etc/prometheus.
+
+Alertmanager routes, that serve the following requirements:
+	Set the following global settings:
+		An SMTP smarthouse for the localhost
+		Set the email sender name to prometheus
+	An overall backup route that groups by alert name and uses the email_backup receiver
+		This route should be set up to use the default group_by, group_wait, and repeat_interval times
+	A route that matches any tickets with a severity of critical
+		Send these to the email_pager
+		Group by team
+	A route that matches for the team called devops
+		Send these to the email_devops receiver
+	Three email receivers:
+		email_backup that sends an email to `alerts@forethoughtapp.io`
+		email_pager that sends an email to `oncall@forethroughtapp.io`
+		email_devops that sends an email to `devops@forethroughapp.io`
+
+To test the alert, stop one of the application servers by running sudo docker stop ft-app.
+
+#####Выполнение#####
+
+# Шаг 1. Add an Alert
+ # Шаг 1.1 Add a rules file configuration to the Prometheus config:
+
+$ sudo $EDITOR /etc/prometheus/prometheus.yml
+
+rule_files:
+  - "rules.yml"
+
+ # Save and exit.
+
+ # Шаг 1.2 Create and open the rules.yml file:
+$ sudo $EDITOR /etc/prometheus/rules.yml
+
+ # Шаг 1.3 Before creating the alert itself, create a recording of the desired metric:
+
+groups:
+  - name: uptime
+    rules:
+      - record: job:uptime:average:ft
+        expr: avg without (instance) (up{job="forethought"})
+
+ # Шаг 1.4 Create the alert to see the application can gone down based on this recording:
+
+groups:
+  - name: uptime
+    rules:
+      - record: job:uptime:average:ft
+        expr: avg without (instance) (up{job="forethought"})
+      - alert: ForethoughtApplicationDown
+        expr: job:uptime:average:ft < .75
+        for: 30s
+        labels:
+          severity: page
+          team: devops
+
+ # Save and exit.
+
+ # Шаг 1.5 Restart Prometheus:
+$ sudo systemctl restart prometheus
+$ sudo systemctl status prometheus
+
+# Шаг 2. Configure Alertmanager
+ # Шаг 2.1 Open the Alertmanager configuration file:
+
+$ sudo $EDITOR /etc/alertmanager/alertmanager.yml
+
+ # Шаг 2.2 Define the global settings:
+
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: 'localhost:25'
+  smtp_from: 'prometheus'
+
+ # Шаг 2.3 Set up the backup route:
+
+route:
+  receiver: 'email_backup'
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1m
+
+ # Шаг 2.4 Set up the route for critical alerts:
+
+route:
+  receiver: 'email_backup'
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1m
+  routes:
+    - match:
+        severity: 'critical'
+      group_by: ['team']
+      receiver: 'email_pager'
+
+ # Шаг 2.5 Set up the route for team alerts:
+
+route:
+  receiver: 'email_backup'
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1m
+  routes:
+    - match:
+        severity: 'critical'
+      group_by: ['team']
+      receiver: 'email_pager'
+      routes:
+        - match:
+            team: devops
+            receiver: 'email_devops'
+
+ # Шаг 2.6 Create the receivers:
+
+receivers:
+- name: 'email_backup'
+  email_configs:
+    - to: 'alerts@forethoughtapp.io'
+- name: 'email_pager'
+  email_configs:
+    - to: 'oncall@forethoughtapp.io'
+- name: 'email_devops'
+  email_configs:
+    - to: 'devops@forethoughtapp.io'
+
+ # Save and exit.
+
+ # Шаг 2.7 Restart Alertmanager:
+
+$ sudo systemctl restart alertmanager
+
+ # Шаг 2.8 Test your alert!
+
+###############
+#Monitoring Infrastructure and Containers with Prometheus#
+###############
+
+# Шаг 1.Add Prometheus as a Data Source
+	Click Add data source from the home page.
+	Select Prometheus.
+	For URL, enter http://localhost:9090.
+	Click Save & Test. Make sure you see the "Data source is working" message.
+
+# Шаг 2.Add the Suggested Dashboards for the Prometheus Data Source
+	Click the Dashboards tab.
+	Click Import next to both Prometheus 2.0 Stats and Grafana metrics.
+
+# Шаг 3.Import the "Node Exporter Full" Dashboard
+	Click the plus sign on the side menu, and then select Import.
+	In a new window or tab, open the Grafana community dashboard website.
+	In the Search within this list box, enter "Node Exporter Full".
+	Select the Node Exporter Full dashboard.
+	Click Copy ID to Clipboard to copy its dashboard ID.
+	Back in the Grafana instance browser tab, paste in the ID.
+	For localhost, click the dropdown and select Prometheus.
+	Click Import.
+
+# Шаг 4. Create a New Dashboard Called "Forethought"
+	Click the plus sign, and select Dashboard.
+	Click the cog icon on the top of the screen and rename the dashboard to Forethought.
+	Click Save.
+	
+# Шаг 5. Add a Heatmap to the Dashboard
+	Click the Add panel button (the bar graph icon in the top right).
+	Select Heatmap.
+	Click the panel title, and then click Edit.
+	Set the metric so it tracks the average of all our response times via bucket:
+		sum(rate(forethought_request_hist_bucket[30s])) by (le)
+	Ensure the Legend format is set to {{le}}.
+	Switch to the Axes tab.
+	Change the Data format to Time series buckets.
+	Click the General tab.
+	Change the title to "Response Times".
+
+# Шаг 6.Save the Dashboard
+	Click the arrow icon in the top right to return to the dashboard.
+	Click the disk icon to save our changes.
+	In the dialog box that pops up, enter the comment "Added response times".
+	Click Save.

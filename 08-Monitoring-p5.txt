@@ -1,0 +1,31 @@
+											#####Vizualization#####
+###############
+#Adding a Dashboard#
+###############
+# Шаг 1. Log in to your Grafana dashboard at PUBLICIP:3000.
+# Шаг 2. In another tab, go to the Grafana dashboard website.
+https://grafana.com/grafana/dashboards
+# Шаг 3. Search for the "Node Exporter Full" dashboard, and copy the dashboard ID.
+# Шаг 4. Back on your Grafana instance, select the plus sign on the side menu and click Import. Paste in the dashboard ID.
+# Шаг 5. Create a new folder called "Prometheus", and also select the Prometheus data source. Import.
+# Шаг 6. To edit a panel, select the name of a panel and click Edit. Singlestat panels are the panels that display a single number, while graphs are the primary panels that display data over time via an x- and a-axis.
+
+###############
+#Building a Panel#
+###############
+# Построение собственного dashboard имеет смысл, если монитоим специфические метрики нашего приложения в контейнере:
+
+# Шаг 1. Return to your Grafana instance at port 3000.
+# Шаг 2. Switch to the Forethought dashboard.
+# Шаг 3. Click Add Panel. Select Heatmap.
+# Шаг 4. When the panel appears, click on the name and then Edit.
+# Шаг 5. Switch to the General tab, and set the name of the chart to Response Time Distribution.
+# Шаг 6. Return to the Metrics tab. We're going to calculate the average response time over time of each of our buckets:
+
+ sum(rate(forethought_requests_hist_bucket[30s])) by (le)
+Set the Legend to {{le}}.
+
+# Шаг 7. From the Axes tab, switch the Data format to Time series buckets.
+# Шаг 8. If desired, further alter the graph's colors and appearance by using the Display tab.
+# Шаг 9. Return to the dashboard.
+# Шаг 10. Click the Save icon, add a comment, and Save.

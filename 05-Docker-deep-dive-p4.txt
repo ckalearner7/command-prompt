@@ -1,0 +1,829 @@
+											#####Docker Swarm#####
+											
+###############
+#Introduction to Docker Swarm#
+###############
+Swarm has two major components:
+	An enterprise grade secure cluster:
+		Manage one or more Docker nodes as a cluster
+		Encrypted distributed cluster store
+		Encrypted networks
+		Secure join tokens
+	An orchestration engine for creating mircoservices:
+		API for deploying and managing microservices
+		Declarative manifest files for defining apps
+		Provides availability to scale apps, and perform rolling updates and rollbacks
+
+Swarm was initially a separate product layered on Docker, since Docker 1.12 it has become a part of the engine.
+
+The Cluster
+	A swarm consists of one or more Docker nodes.
+	Nodes are either a managers or a worker.
+	Managers:
+		Manage the state of the cluster
+		Dispatch tasks to workers
+	Workers:
+		Accepts and execute tasks
+	State is held in etcd
+	Swarm uses Transport Layer Security (TLS):
+		Encrypted communication
+		Authenticated nodes
+		Authorized roles
+
+Orchestration
+	The atomic unit of scheduling is a swarm service.
+	The service construct adds the following to a container:
+		scaling
+		rolling updates
+		rollback
+		updates
+	A container wrapped in a service is a task or a replica.
+	
+###############
+#Running Docker in Swarm Mode#
+###############
+
+###Swarm Master###
+#Private IP: 172.31.102.36/20 - все в одной подсети 172.31.96.0.20
+[cloud_user@fas3c ~]$ sudo yum remove -y docker \ # Удалить старые версии Docker
+>                   docker-client \
+>                   docker-client-latest \
+>                   docker-common \
+>                   docker-latest \
+>                   docker-latest-logrotate \
+>                   docker-logrotate \
+>                   docker-engine
+
+[cloud_user@fas3c ~]$ sudo yum install -y yum-utils \ # Добавить хранилище Docker
+>   device-mapper-persistent-data \
+>   lvm2
+
+[cloud_user@fas3c ~]$ sudo yum-config-manager # Установить репозиторий
+>     --add-repo \
+>     https://download.docker.com/linux/centos/docker-ce.repo
+
+[cloud_user@fas3c ~]$ sudo yum -y install docker-ce # Установить Docker-ce
+
+[cloud_user@fas3c ~]$ sudo systemctl start docker && sudo systemctl enable docker # Запустить службу и добавить в автозагрузку
+
+[cloud_user@fas3c ~]$ sudo usermod -aG docker cloud_user #  Добавить пользователя в группу docker
+
+[cloud_user@fas3c ~]$ sudo docker swarm init --advertise-addr 172.31.102.36 # Создать Swarm Master
+Swarm initialized: current node (v79z7rs446u8uxrvlb3ad932m) is now a manager.
+
+To add a worker to this swarm, run the following command:
+
+    docker swarm join --token SWMTKN-1-35kdib0wva69jpjvhkuopfhm1f6zqifwzplpfqu1ijrj6j7dfd-adiy3i6zmhjoqc6g4j16r26ee 172.31.102.36:2377 # Строка подключения Swarm Workers 
+
+To add a manager to this swarm, run 'docker swarm join-token manager' and follow the instructions.
+
+[cloud_user@fas3c ~]$ sudo docker node ls # Проверка количества нод
+ID                            HOSTNAME                       STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+fvdg0xuxrd6z2e95w5h00nf3x     fas1c.mylabserver.com   Ready               Active                                  19.03.5
+j2mp16w6ixlqcbvifjtu024ft     fas2c.mylabserver.com   Ready               Active                                  19.03.5
+v79z7rs446u8uxrvlb3ad932m *   fas3c.mylabserver.com   Ready               Active              Leader              19.03.5
+
+
+###Swarm Worker 1###
+#Private IP: 172.31.102.192/20 - все в одной подсети 172.31.96.0.20
+# Установить Docker аналогично Swarm Master
+
+[cloud_user@fas1c ~]$ sudo docker swarm join --token SWMTKN-1-35kdib0wva69jpjvhkuopfhm1f6zqifwzplpfqu1ijrj6j7dfd-adiy3i6zmhjoqc6g4j16r26ee 172.31.102.36:2377
+[sudo] password for cloud_user:
+This node joined a swarm as a worker.
+
+###Swarm Worker 2###
+#Private IP: 172.31.111.49/20 - все в одной подсети 172.31.96.0.20
+# Установить Docker аналогично Swarm Worker 1
+
+###############
+#Managing Swarm Nodes#
+###############
+Docker node commands:
+	demote: Demotes one or more nodes from manager in the swarm
+	inspect: Displays detailed information on one or more nodes
+	ls: Lists nodes in the swarm
+	promote: Promotes one or more nodes to manager in the swarm
+	ps: Lists tasks running on one or more nodes, defaults to current node
+	rm: Removes one or more nodes from the swarm
+	update: Updates a node
+
+Docker swarm commands:
+	ca: Displays and rotate the root CA
+	init: Initializes a swarm
+	join: Joins a swarm as a node and/or manager
+	join-token: Manages join tokens
+	leave: Leaves the swarm
+	unlock: Unlocks swarm
+	unlock-key: Manages the unlock key
+	update: Updates the swarm
+
+[cloud_user@fas3c ~]$ docker node ls # Показать список нод
+ID                            HOSTNAME                       STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+fvdg0xuxrd6z2e95w5h00nf3x     fas1c.mylabserver.com   Ready               Active                                  19.03.5
+j2mp16w6ixlqcbvifjtu024ft     fas2c.mylabserver.com   Ready               Active                                  19.03.5
+v79z7rs446u8uxrvlb3ad932m *   fas3c.mylabserver.com   Ready               Active              Leader              19.03.5
+
+[cloud_user@fas3c ~]$ docker node inspect fas1c.mylabserver.com # Детализация по конкретной ноде
+
+# Сценарий 1. Добавить/Удалить дополнительного manager`a
+[cloud_user@fas3c ~]$ docker node ls
+ID                            HOSTNAME                       STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+fvdg0xuxrd6z2e95w5h00nf3x     fas1c.mylabserver.com   Ready               Active                                  19.03.5
+j2mp16w6ixlqcbvifjtu024ft     fas2c.mylabserver.com   Ready               Active                                  19.03.5
+v79z7rs446u8uxrvlb3ad932m *   fas3c.mylabserver.com   Ready               Active              Leader              19.03.5
+[cloud_user@fas3c ~]$ docker node promote fas1c.mylabserver.com # Добавить претендента
+Node fas1c.mylabserver.com promoted to a manager in the swarm.
+[cloud_user@fas3c ~]$ docker node ls
+ID                            HOSTNAME                       STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+fvdg0xuxrd6z2e95w5h00nf3x     fas1c.mylabserver.com   Ready               Active              Reachable           19.03.5		# Статус Manager=Reachable
+j2mp16w6ixlqcbvifjtu024ft     fas2c.mylabserver.com   Ready               Active                                  19.03.5
+v79z7rs446u8uxrvlb3ad932m *   fas3c.mylabserver.com   Ready               Active              Leader              19.03.5
+[cloud_user@fas3c ~]$ docker node demote fas1c.mylabserver.com # Убрать претендента
+Manager fas1c.mylabserver.com demoted in the swarm.
+[cloud_user@fas3c ~]$ docker node ls
+ID                            HOSTNAME                       STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+fvdg0xuxrd6z2e95w5h00nf3x     fas1c.mylabserver.com   Ready               Active                                  19.03.5
+j2mp16w6ixlqcbvifjtu024ft     fas2c.mylabserver.com   Ready               Active                                  19.03.5
+v79z7rs446u8uxrvlb3ad932m *   fas3c.mylabserver.com   Ready               Active              Leader              19.03.5
+
+# Сценарий 2. Удалить worker fas2c
+[cloud_user@fas3c ~]$ docker node rm -f fas2c.mylabserver.com # Первая часть - это удаление роли
+fas2c.mylabserver.com
+[cloud_user@fas3c ~]$ docker node ls
+ID                            HOSTNAME                       STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+fvdg0xuxrd6z2e95w5h00nf3x     fas1c.mylabserver.com   Ready               Active                                  19.03.5
+v79z7rs446u8uxrvlb3ad932m *   fas3c.mylabserver.com   Ready               Active              Leader              19.03.5
+
+[cloud_user@fas2c ~]$ docker swarm leave # Вторая часть - выход из кластера
+Node left the swarm.
+
+# Сценарий 3. Вернуть worker fas2c обратно
+[cloud_user@fas3c ~]$ docker swarm join-token worker
+To add a worker to this swarm, run the following command:
+
+    docker swarm join --token SWMTKN-1-35kdib0wva69jpjvhkuopfhm1f6zqifwzplpfqu1ijrj6j7dfd-adiy3i6zmhjoqc6g4j16r26ee 172.31.102.36:2377
+
+[cloud_user@fas2c ~]$ docker swarm join --token SWMTKN-1-35kdib0wva69jpjvhkuopfhm1f6zqifwzplpfqu1ijrj6j7dfd-adiy3i6zmhjoqc6g4j16r26ee 172.31.102.36:2377
+This node joined a swarm as a worker.
+
+[cloud_user@fas3c ~]$ docker node ls
+ID                            HOSTNAME                       STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+fvdg0xuxrd6z2e95w5h00nf3x     fas1c.mylabserver.com   Ready               Active                                  19.03.5
+y4fp6tu3es44l9am6ij9z5l1h     fas2c.mylabserver.com   Ready               Active                                  19.03.5
+v79z7rs446u8uxrvlb3ad932m *   fas3c.mylabserver.com   Ready               Active              Leader              19.03.5
+
+# Сценарий 2. Ошибка в удалении worker fas2c
+
+[cloud_user@fas2c ~]$ docker swarm leave # Пропустили первую часть удаления
+Node left the swarm.
+
+[cloud_user@fas3c ~]$ docker node ls
+ID                            HOSTNAME                       STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+fvdg0xuxrd6z2e95w5h00nf3x     fas1c.mylabserver.com   Ready               Active                                  19.03.5
+y4fp6tu3es44l9am6ij9z5l1h     fas2c.mylabserver.com   Down                Active                                  19.03.5 		# Отключена
+v79z7rs446u8uxrvlb3ad932m *   fas3c.mylabserver.com   Ready               Active              Leader              19.03.5
+
+[cloud_user@fas3c ~]$ docker swarm join-token worker
+To add a worker to this swarm, run the following command:
+
+    docker swarm join --token SWMTKN-1-35kdib0wva69jpjvhkuopfhm1f6zqifwzplpfqu1ijrj6j7dfd-adiy3i6zmhjoqc6g4j16r26ee 172.31.102.36:2377
+	
+[cloud_user@fas2c ~]$ docker swarm join --token SWMTKN-1-35kdib0wva69jpjvhkuopfhm1f6zqifwzplpfqu1ijrj6j7dfd-adiy3i6zmhjoqc6g4j16r26ee 172.31.102.36:2377 # Возвращаем обратно в кластер
+This node joined a swarm as a worker.
+
+[cloud_user@fas3c ~]$ docker node ls
+ID                            HOSTNAME                       STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+fvdg0xuxrd6z2e95w5h00nf3x     fas1c.mylabserver.com   Ready               Active                                  19.03.5
+k32pq1xxyifkssl8e45i0p94m     fas2c.mylabserver.com   Ready               Active                                  19.03.5		# Актуальная запись
+y4fp6tu3es44l9am6ij9z5l1h     fas2c.mylabserver.com   Down                Active                                  19.03.5		# Отключена | Старая запись
+v79z7rs446u8uxrvlb3ad932m *   fas3c.mylabserver.com   Ready               Active              Leader              19.03.5
+
+[cloud_user@fas3c ~]$ docker node rm y4fp6tu3es44l9am6ij9z5l1h # Удаляем старую запись
+y4fp6tu3es44l9am6ij9z5l1h
+
+###############
+#Working with Services#
+###############
+[cloud_user@fas3c ~]$ docker service create -d --name nginx_service -p 8080:80 --replicas 2 nginx:latest # Создаем сервис на Manager, a сами контейнеры запускаются на Workers
+
+[cloud_user@fas3c ~]$ docker service ls # Посмотреть список сервисов
+ID                  NAME                MODE                REPLICAS            IMAGE               PORTS
+wujvxpr578aq        nginx_service       replicated          2/2                 nginx:latest        *:8080->80/tcp
+
+[cloud_user@fas3c ~]$ docker service inspect nginx_service # Посмотреть информацию о сервисе
+
+[cloud_user@fas3c ~]$ docker service inspect nginx_service | grep NetworkID
+                    "NetworkID": "qdsrb9cv3ui3wwf19ax7z6om6",
+					
+[cloud_user@fas3c ~]$ docker network ls --no-trunc | grep qdsrb9cv3ui3wwf19ax7z6om6 # Для swarm создается отдельная overlay-сеть
+qdsrb9cv3ui3wwf19ax7z6om6                                          ingress             overlay             swarm
+[cloud_user@fas3c ~]$ docker network ls
+NETWORK ID          NAME                DRIVER              SCOPE
+53b0886117a9        bridge              bridge              local
+592da50b8a18        docker_gwbridge     bridge              local
+43d935c1708c        host                host                local
+qdsrb9cv3ui3        ingress             overlay             swarm	# Отдельная сеть
+e419f8607456        none                null                local
+
+[cloud_user@fas3c ~]$ docker service logs nginx_service # Показать логи сервиса
+
+[cloud_user@fas3c ~]$ docker service ps nginx_service # Показать список процессов в сервисе (то есть контейнеров)
+ID                  NAME                IMAGE               NODE                           DESIRED STATE       CURRENT STATE            ERROR               PORTS
+gmoijn75kjnn        nginx_service.1     nginx:latest        fas2c.mylabserver.com   Running             Running 12 minutes ago
+txek2mtlg69s        nginx_service.2     nginx:latest        fas1c.mylabserver.com   Running             Running 12 minutes ago
+
+[cloud_user@fas3c ~]$ docker service scale nginx_service=3 # Масштабирование сервиса
+nginx_service scaled to 3
+overall progress: 3 out of 3 tasks
+1/3: running   [==================================================>]
+2/3: running   [==================================================>]
+3/3: running   [==================================================>]
+verify: Service converged
+
+[cloud_user@fas3c ~]$ docker service ps nginx_service
+ID                  NAME                IMAGE               NODE                           DESIRED STATE       CURRENT STATE            ERROR               PORTS
+gmoijn75kjnn        nginx_service.1     nginx:latest        fas2c.mylabserver.com   Running             Running 14 minutes ago
+txek2mtlg69s        nginx_service.2     nginx:latest        fas1c.mylabserver.com   Running             Running 14 minutes ago
+b61g1b2c3ful        nginx_service.3     nginx:latest        fas3c.mylabserver.com   Running             Running 30 seconds ago	# Новый сервис запустился на manager`e
+
+[cloud_user@fas3c ~]$ docker service scale nginx_service=2
+nginx_service scaled to 2
+overall progress: 2 out of 2 tasks
+1/2: running   [==================================================>]
+2/2: running   [==================================================>]
+verify: Service converged
+
+[cloud_user@fas3c ~]$ docker service ps nginx_service
+ID                  NAME                IMAGE               NODE                           DESIRED STATE       CURRENT STATE            ERROR               PORTS
+gmoijn75kjnn        nginx_service.1     nginx:latest        fas2c.mylabserver.com   Running             Running 15 minutes ago
+txek2mtlg69s        nginx_service.2     nginx:latest        fas1c.mylabserver.com   Running             Running 15 minutes ago
+
+[cloud_user@fas3c ~]$ docker service update -h # Обновление параметров сервиса
+      --args command                       Service command args
+
+[cloud_user@fas3c ~]$ curl localhost:8080 # Доступность NGINX с manager`a отсутствует
+^C
+[cloud_user@fas3c ~]$ curl 54.226.227.23:8080 # Доступность NGINX с Public IP worker`a отсутствует
+^C
+[cloud_user@fas3c ~]$ curl 172.31.102.192:8080 # Доступность NGINX с Private IP worker`a есть
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+
+[cloud_user@fas1c ~]$ docker ps # Когда создали сервис, на worker`ах создаются контейнеры
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+5b98edb0fea9        nginx:latest        "nginx -g 'daemon of…"   27 minutes ago      Up 27 minutes       80/tcp              nginx_service.2.txek2mtlg69stqco36a8x2brd
+
+Docker service commands:
+	create: Creates a new service
+	inspect: Displays detailed information on one or more services
+	logs: Fetches the logs of a service or task
+	ls: Lists services
+	ps: Lists the tasks of one or more services
+	rm: Removes one or more services
+	rollback: Reverts changes to a service's configuration
+	scale: Scales one or multiple replicated services
+	update: Updates a service
+	
+###############
+#Using Networks in Swarm Mode#
+###############
+[cloud_user@fas3c ~]$ docker network ls # Показать информацию о сетях
+NETWORK ID          NAME                DRIVER              SCOPE
+53b0886117a9        bridge              bridge              local
+592da50b8a18        docker_gwbridge     bridge              local 	# Создается по умолчанию
+43d935c1708c        host                host                local
+qdsrb9cv3ui3        ingress             overlay             swarm 	# Создается по умолчанию и используется по умолчанию
+e419f8607456        none                null                local
+
+[cloud_user@fas3c ~]$ docker network create -d overlay my_overlay # Создаем overlay-сеть
+
+[cloud_user@fas3c ~]$ docker network ls
+NETWORK ID          NAME                DRIVER              SCOPE
+53b0886117a9        bridge              bridge              local
+592da50b8a18        docker_gwbridge     bridge              local
+43d935c1708c        host                host                local
+qdsrb9cv3ui3        ingress             overlay             swarm
+9q5xrknv7mvp        my_overlay          overlay             swarm
+e419f8607456        none                null                local
+
+[cloud_user@fas3c ~]$ docker network create -d overlay --opt encrypted encrypted_overlay # Создаем overlay-сеть с шифрованием
+7142lwunwksxlvch2s3wcatl2
+[cloud_user@fas3c ~]$ docker network ls
+NETWORK ID          NAME                DRIVER              SCOPE
+53b0886117a9        bridge              bridge              local
+592da50b8a18        docker_gwbridge     bridge              local
+7142lwunwksx        encrypted_overlay   overlay             swarm
+43d935c1708c        host                host                local
+qdsrb9cv3ui3        ingress             overlay             swarm
+9q5xrknv7mvp        my_overlay          overlay             swarm
+e419f8607456        none                null                local
+
+[cloud_user@fas3c ~]$ docker service create -d --name nginx_overlay --network my_overlay -p 8081:80 --replicas 2 nginx:latest # Создаем сервис в конкретной сети my_overlay
+
+[cloud_user@fas3c ~]$ docker service ls
+ID                  NAME                MODE                REPLICAS            IMAGE               PORTS
+cjhb9rbfalvm        nginx_overlay       replicated          2/2                 nginx:latest        *:8081->80/tcp
+
+
+[cloud_user@fas3c ~]$ docker service create -d --name nginx_service -p 8080:80 --replicas 2 nginx:latest # Создаем стандартный сервис
+
+[cloud_user@fas3c ~]$ docker service ls
+ID                  NAME                MODE                REPLICAS            IMAGE               PORTS
+cjhb9rbfalvm        nginx_overlay       replicated          2/2                 nginx:latest        *:8081->80/tcp
+np42ct5abtbg        nginx_service       replicated          2/2                 nginx:latest        *:8080->80/tcp
+
+[cloud_user@fas3c ~]$ docker service update --network-add my_overlay nginx_service # Добавляем еще одну сеть для сервиса
+nginx_service
+overall progress: 2 out of 2 tasks
+1/2: running   [==================================================>]
+2/2: running   [==================================================>]
+verify: Service converged
+
+[cloud_user@fas3c ~]$ docker service inspect nginx_service | grep NetworkID # Проверка
+                    "NetworkID": "qdsrb9cv3ui3wwf19ax7z6om6",
+                    "NetworkID": "9q5xrknv7mvpk6hho4buycsly",
+
+[cloud_user@fas3c ~]$ docker service update --network-rm my_overlay nginx_service # Удаляем сеть для сервиса
+nginx_service
+overall progress: 2 out of 2 tasks
+1/2: running   [==================================================>]
+2/2: running   [==================================================>]
+verify: Service converged
+[cloud_user@fas3c ~]$ docker service inspect nginx_service | grep NetworkID # Проверка
+                    "NetworkID": "qdsrb9cv3ui3wwf19ax7z6om6",
+
+[cloud_user@fas3c ~]$ docker network rm encrypted_overlay # Удаляем сеть
+encrypted_overlay
+[cloud_user@fas3c ~]$ docker network ls
+NETWORK ID          NAME                DRIVER              SCOPE
+53b0886117a9        bridge              bridge              local
+592da50b8a18        docker_gwbridge     bridge              local
+43d935c1708c        host                host                local
+qdsrb9cv3ui3        ingress             overlay             swarm
+9q5xrknv7mvp        my_overlay          overlay             swarm
+e419f8607456        none                null                local
+
+###############
+#Using Volumes in Swarm Mode#
+###############
+https://hub.docker.com/search?q=volume%20plugins&type=plugin&category=volume # Список плагинов
+https://rexray.readthedocs.io/en/stable/user-guide/schedulers/docker/plug-ins/ #Rex-Ray	
+
+# Сценарий 1. Изучение коменд для работы с плагином
+Для работы с томами в Swarm нужно использовать плагины, причина в том, что стандартный драйвер работает только в локальном режиме.
+Volume Plugins:
+	Hedvig
+	Pure Storage
+	HPE Nimble Storage
+	Nutanix DVP
+	Blockbridge
+	NexentaStor
+	StorageOS
+	Rex-Ray	# Используем этот
+	
+[cloud_user@fas3c ~]$ docker plugin install store/splunk/docker-logging-plugin:2.0.0 --alias splunk-logging-plugin # Установка плагина Splunk для логирования
+Plugin "store/splunk/docker-logging-plugin:2.0.0" is requesting the following privileges:
+ - network: [host]
+Do you grant the above permissions? [y/N] y
+2.0.0: Pulling from store/splunk/docker-logging-plugin
+0b377864060d: Download complete
+Digest: sha256:ab0c4f5a580190c3a6590d4b6378b89a40e9555cbd97737c323b6cd1a8ce26aa
+Status: Downloaded newer image for store/splunk/docker-logging-plugin:2.0.0
+Installed plugin store/splunk/docker-logging-plugin:2.0.0
+
+[cloud_user@fas3c ~]$ docker plugin ls # Проверка установленных плагинов
+ID                  NAME                           DESCRIPTION             ENABLED
+c2581ff68fec        splunk-logging-plugin:latest   Splunk Logging Plugin   true
+
+[cloud_user@fas3c ~]$ docker plugin disable c2581ff68fec # Выключение плагина
+c2581ff68fec
+[cloud_user@fas3c ~]$ docker plugin ls # Проверка
+ID                  NAME                           DESCRIPTION             ENABLED
+c2581ff68fec        splunk-logging-plugin:latest   Splunk Logging Plugin   false
+
+[cloud_user@fas3c ~]$ docker plugin rm c2581ff68fec # Удаление плагина
+c2581ff68fec
+[cloud_user@fas3c ~]$ docker plugin ls # Проверка
+ID                  NAME                DESCRIPTION         ENABLED
+
+# Сценарий 2. Работа с плагинами для томов
+Процесс установки тут:
+https://rexray.readthedocs.io/en/stable/user-guide/schedulers/docker/plug-ins/aws/#aws-ebs (на примере Amazon Elastic Block Store - EBS)
+https://github.com/rexray/rexray
+
+Установка плагина Rex-Ray (в лабе это пропущено):
+
+docker plugin install rexray/dobs \
+DOBS_REGION=<DO_REGION> \
+DOBS_TOKEN=<DIGITAL_OCEAN_TOKEN> \
+DOBS_CONVERTUNDERSCORES=true
+
+# Сценарий 3. Создание сервиса с Portainaer, который запущен на manager`e
+[cloud_user@fas3c ~]$ docker volume create -d local portainer_data # Создать том на manager
+portainer_data
+[cloud_user@fas3c ~]$ docker volume ls # Проверка
+DRIVER              VOLUME NAME
+local               portainer_data
+
+[cloud_user@fas2c ~]$ docker volume ls # На worker`e тома нет, он должен создаться только локально на master
+DRIVER              VOLUME NAME
+
+[cloud_user@fas3c ~]$ docker service create \ # Создание сервиса с одной репликой
+> --name portainer \
+> --publish 8000:9000 \
+> --constraint 'node.role == manager' \ # Ограничения размещения, то есть разместить только на manager
+> --mount type=volume,src=portainer_data,dst=/data \ # Нужно использовать --mount, так как -v специфичен для каждого контейнера
+> --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
+> portainer/portainer \
+> -H unix:///var/run/docker.sock
+qu34k8ppu00qk3vyi6tpfnltm
+overall progress: 1 out of 1 tasks
+1/1: running   [==================================================>]
+verify: Service converged
+[cloud_user@fas3c ~]$
+
+[cloud_user@fas3c ~]$ docker service ls | grep port # Проверка
+qu34k8ppu00q        portainer           replicated          1/1                 portainer/portainer:latest   *:8000->9000/tcp
+
+[cloud_user@fas3c ~]$ docker ps # Контейнер на manager создался
+CONTAINER ID        IMAGE                        COMMAND                  CREATED             STATUS              PORTS               NAMES
+072d399d50da        portainer/portainer:latest   "/portainer -H unix:…"   4 minutes ago       Up 4 minutes        9000/tcp            portainer.1.jsut34cs8bu6295qwa5gj7809
+
+Portainaer будет доступен по http://3.87.116.109:8000/ # 3.87.116.109 - public IP на manager
+
+В итоге мы создали сервис, который запустил контейнер на manager`e и использует его локальный том
+
+Cлужба (демон) Docker использует UNIX сокет /var/run/docker.sock для входящих соединений API. Владельцем данного ресурса должен быть пользователь root.
+
+###############
+#Deploying Stacks in Docker Swarm#
+###############
+Docker stack commands:
+	deploy: Deploys a new stack or update an existing stack
+	ls: Lists stacks
+	ps: Lists the tasks in the stack
+	rm: Removes one or more stacks
+	services: Lists the services in the stack
+
+# Шаг 1. Подготовка окружения на swarm manager
+[cloud_user@fas3c ~]$ mkdir -p swarm/prometheus
+[cloud_user@fas3c ~]$ cd swarm/prometheus
+
+# Шаг 2. Файл конфигурации Prometheus
+[cloud_user@fas3c prometheus]$ vi prometheus.yml
+global:
+  scrape_interval: 15s
+  scrape_timeout: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    scrape_interval: 5s
+    static_configs:
+    - targets:
+      - prometheus_main:9090
+
+  - job_name: nodes
+    scrape_interval: 5s
+    static_configs:
+    - targets:
+      - 172.31.102.36:9100 #EC2 private IP for Swarm Manager
+      - 172.31.102.192:9100 #EC2 private IP for Swarm Worker 1
+      - 172.31.111.49:9100 #EC2 private IP for Swarm Worker 2
+
+  - job_name: cadvisor
+    scrape_interval: 5s
+    static_configs:
+    - targets:
+      - 172.31.102.36:8081 #EC2 private IP for Swarm Manager
+      - 172.31.102.192:8081 #EC2 private IP for Swarm Worker 1
+      - 172.31.111.49:8081 #EC2 private IP for Swarm Worker 2
+
+# Шаг 3. Создание compose-файла
+[cloud_user@fas3c prometheus]$ vi docker-compose.yml
+version: '3'
+services:
+  main:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - 8080:9090
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus/data
+    volumes:
+    - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - data:/prometheus/data
+    depends_on:
+      - cadvisor
+      - node-exporter
+  cadvisor:
+    image: google/cadvisor:latest
+    container_name: cadvisor
+    deploy:
+      mode: global
+    restart: unless-stopped
+    ports:
+      - 8081:8080
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    deploy:
+      mode: global
+    restart: unless-stopped
+    ports:
+      - 9100:9100
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - --collector.filesystem.ignored-mount-points
+      - "^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)"
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - 8082:3000
+    volumes:
+    - grafana_data:/var/lib/grafana
+    - grafana_plugins:/var/lib/grafana/plugins
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=P4ssW0rd0!
+    depends_on:
+      - prometheus
+      - cadvisor
+      - node-exporter
+
+volumes:
+  data:
+  grafana_data:
+  grafana_plugins:
+  
+# Шаг 4. Удаление лишних service, чтобы не было перекрытия по портам
+[cloud_user@fas3c prometheus]$ docker service ls
+[cloud_user@fas3c prometheus]$ docker service rm cjhb9rbfalvm np42ct5abtbg qu34k8ppu00q
+
+# Шаг 5. Внедрение Docker stack
+[cloud_user@fas3c prometheus]$ docker stack deploy --compose-file docker-compose.yml prometheus
+Ignoring unsupported options: restart
+
+Ignoring deprecated options:
+
+container_name: Setting the container name is not supported.
+
+Creating network prometheus_default
+Creating service prometheus_main
+Creating service prometheus_cadvisor
+Creating service prometheus_node-exporter
+Creating service prometheus_grafana
+
+[cloud_user@fas3c prometheus]$ docker stack ls
+NAME                SERVICES            ORCHESTRATOR
+prometheus          4                   Swarm
+[cloud_user@fas3c prometheus]$ docker service ls | grep prom # На manager появились четыре сервиса
+a5rvdm779rdp        prometheus_cadvisor        global              3/3                 google/cadvisor:latest      *:8081->8080/tcp
+36njavr9wz0x        prometheus_grafana         replicated          1/1                 grafana/grafana:latest      *:8082->3000/tcp
+b1m4gv116w1t        prometheus_main            replicated          0/1                 prom/prometheus:latest      *:8080->9090/tcp
+ul5cdn3yo8lm        prometheus_node-exporter   global              3/3                 prom/node-exporter:latest   *:9100->9100/tcp
+[cloud_user@fas3c prometheus]$ docker ps | grep prom # На manager появились два контейнера
+b5cfe2f58ff4        google/cadvisor:latest      "/usr/bin/cadvisor -…"   About a minute ago   Up About a minute   8080/tcp            prometheus_cadvisor.v79z7rs446u8uxrvlb3ad932m.rf3y0r9imvf59v749rql3fc7f
+28f9cebc6009        prom/node-exporter:latest   "/bin/node_exporter …"   About a minute ago   Up About a minute   9100/tcp            prometheus_node-exporter.v79z7rs446u8uxrvlb3ad932m.nan6l91g9h2faujfg1cj9puoa
+
+[cloud_user@fas1c ~]$ docker ps # На Worker 1 появились два контейнера
+CONTAINER ID        IMAGE                       COMMAND                  CREATED             STATUS              PORTS               NAMES
+f88be754b8d0        google/cadvisor:latest      "/usr/bin/cadvisor -…"   2 minutes ago       Up 2 minutes        8080/tcp            prometheus_cadvisor.fvdg0xuxrd6z2e95w5h00nf3x.0m55uav3vzl0e9nif5ty5ma5x
+7793b4d11245        prom/node-exporter:latest   "/bin/node_exporter …"   2 minutes ago       Up 2 minutes        9100/tcp            prometheus_node-exporter.fvdg0xuxrd6z2e95w5h00nf3x.rjhcj5wsy6ypto13201ciaahn
+
+[cloud_user@fas2c ~]$ docker ps  # На Worker 2 появились три контейнера
+CONTAINER ID        IMAGE                       COMMAND                  CREATED             STATUS              PORTS               NAMES
+777a1881d1ff        grafana/grafana:latest      "/run.sh"                2 minutes ago       Up 2 minutes        3000/tcp            prometheus_grafana.1.1i7sjrug989eovz02bzigjwvx
+e27fcf07bfb3        google/cadvisor:latest      "/usr/bin/cadvisor -…"   2 minutes ago       Up 2 minutes        8080/tcp            prometheus_cadvisor.k32pq1xxyifkssl8e45i0p94m.jov9unvf4c78ynloigrlcgzbu
+08f8fb6a96a8        prom/node-exporter:latest   "/bin/node_exporter …"   2 minutes ago       Up 2 minutes        9100/tcp            prometheus_node-exporter.k32pq1xxyifkssl8e45i0p94m.gidvp0fw1nb0xznw7rkmc9txp
+
+#Сразу наблюдается проблема с поднятием образа Prometheus. Это связано с пользователем в dockerfile
+#https://github.com/prometheus/prometheus/blob/master/Dockerfile строка 21: "USER       nobody"
+#Проблема решается переназначением прав:
+[cloud_user@fas3c ~]$ sudo chown nfsnobody:nfsnobody -R /var/lib/docker/volumes/prometheus_data
+[cloud_user@fas3c prometheus]$ sudo chown nfsnobody:nfsnobody prometheus.yml
+
+[cloud_user@fas3c prometheus]$ docker service ls
+ID                  NAME                       MODE                REPLICAS            IMAGE                       PORTS
+a5rvdm779rdp        prometheus_cadvisor        global              3/3                 google/cadvisor:latest      *:8081->8080/tcp
+36njavr9wz0x        prometheus_grafana         replicated          1/1                 grafana/grafana:latest      *:8082->3000/tcp
+b1m4gv116w1t        prometheus_main            replicated          1/1                 prom/prometheus:latest      *:8080->9090/tcp #Все заработало
+ul5cdn3yo8lm        prometheus_node-exporter   global              3/3                 prom/node-exporter:latest   *:9100->9100/tcp
+
+# Шаг 6. Проверка доступности Prometheus
+Prometheus будет доступен по WEB-интерфейсу http://54.210.181.94:8080/graph по Public IP в Swarm Manager
+
+[cloud_user@fas3c ~]$ docker stack ps prometheus
+ID                  NAME                                                 IMAGE                       NODE                           DESIRED STATE       CURRENT STATE             ERROR                              PORTS
+rjhcj5wsy6yp        prometheus_node-exporter.fvdg0xuxrd6z2e95w5h00nf3x   prom/node-exporter:latest   fas1c.mylabserver.com   Running             Running 38 minutes ago
+nan6l91g9h2f        prometheus_node-exporter.v79z7rs446u8uxrvlb3ad932m   prom/node-exporter:latest   fas3c.mylabserver.com   Running             Running 38 minutes ago
+gidvp0fw1nb0        prometheus_node-exporter.k32pq1xxyifkssl8e45i0p94m   prom/node-exporter:latest   fas2c.mylabserver.com   Running             Running 38 minutes ago
+rf3y0r9imvf5        prometheus_cadvisor.v79z7rs446u8uxrvlb3ad932m        google/cadvisor:latest      fas3c.mylabserver.com   Running             Running 38 minutes ago
+jov9unvf4c78        prometheus_cadvisor.k32pq1xxyifkssl8e45i0p94m        google/cadvisor:latest      fas2c.mylabserver.com   Running             Running 38 minutes ago
+0m55uav3vzl0        prometheus_cadvisor.fvdg0xuxrd6z2e95w5h00nf3x        google/cadvisor:latest      fas1c.mylabserver.com   Running             Running 38 minutes ago
+jdjijknt85xi        prometheus_main.1                                    prom/prometheus:latest      fas3c.mylabserver.com   Running             Running 13 minutes ago
+ia12aom7lsl0         \_ prometheus_main.1                                prom/prometheus:latest      fas1c.mylabserver.com   Shutdown            Rejected 13 minutes ago   "invalid mount config for type…"
+dmt6vb77ir3u         \_ prometheus_main.1                                prom/prometheus:latest      fas1c.mylabserver.com   Shutdown            Rejected 13 minutes ago   "invalid mount config for type…"
+lw3tyg0zf0ne         \_ prometheus_main.1                                prom/prometheus:latest      fas1c.mylabserver.com   Shutdown            Rejected 13 minutes ago   "invalid mount config for type…"
+wbutqsvzycww         \_ prometheus_main.1                                prom/prometheus:latest      fas2c.mylabserver.com   Shutdown            Rejected 13 minutes ago   "invalid mount config for type…"
+1i7sjrug989e        prometheus_grafana.1                                 grafana/grafana:latest      fas2c.mylabserver.com   Running             Running 38 minutes ago
+
+# Шаг 7. Удаление Stacks
+[cloud_user@fas3c ~]$ docker stack rm prometheus
+Removing service prometheus_cadvisor
+Removing service prometheus_grafana
+Removing service prometheus_main
+Removing service prometheus_node-exporter
+Removing network prometheus_default
+[cloud_user@fas3c ~]$ docker service ls
+ID                  NAME                MODE                REPLICAS            IMAGE               PORTS
+[cloud_user@fas3c ~]$ docker stack ls
+NAME                SERVICES            ORCHESTRATOR
+
+###############
+#Lab 1. Setting Up Docker Swarm#
+###############
+#Условие задачи
+После многих лет работы с контейнерами на одном хосте Docker, вы решили перейти на использование Docker Swarm. Использование Swarm позволит вашим клиентам увеличить количество контейнеров, так как спрос увеличивается, а затем уменьшается, так как спрос угасает.
+Прежде чем это сделать, вам сначала нужно настроить кластер Swarm, состоящий из менеджера и рабочего узла. После завершения установки создайте сервис Nginx для тестирования кластера.
+
+#План:
+Setting up the Swarm:
+	Login to your Swarm manager and initialize the swarm. Use the advertise-addr flag and supply the private IP of the manager.
+	Use the join command that gets generated, and have the worker node join the swarm.
+	Test the swarm by listing the nodes.
+
+Create a Service:
+	Create an Nginx service that runs in the background.
+	Name it nginx_service.
+	Publish port 8080 on the host to port 80 on the container.
+	Make sure that the service has two replicas.
+	Make sure to user the latest image of Nginx.
+
+#Решение
+# Шаг 1. Initialize the Swarm
+[cloud_user@ip-10-0-1-40 ~]$ docker swarm init \
+> --advertise-addr 10.0.1.40
+Swarm initialized: current node (u2c8a04buasmmr2s0mahf5l37) is now a manager.
+To add a worker to this swarm, run the following command:
+    docker swarm join --token SWMTKN-1-2702i3m0j4cq4hsth8agtf2fxthqjd3tpefd74kdlypayfhx1v-81hwkm9tj0da5w7k3odrk1bu7 10.0.1.40:2377
+To add a manager to this swarm, run 'docker swarm join-token manager' and follow the instructions.
+
+# Шаг 2. Add the Worker to the Cluster
+[cloud_user@ip-10-0-1-33 ~]$ docker swarm join --token SWMTKN-1-2702i3m0j4cq4hsth8agtf2fxthqjd3tpefd74kdlypayfhx1v-81hwkm9tj0da5w7k3odrk1bu7 10.0.1.40:2377
+This node joined a swarm as a worker.
+
+[cloud_user@ip-10-0-1-40 ~]$ docker node ls # Проверка, что ноды появились
+ID                            HOSTNAME                    STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+nu4flyyi4nl19ubf7t1vzseq3     ip-10-0-1-33.ec2.internal   Ready               Active                                  19.03.2
+u2c8a04buasmmr2s0mahf5l37 *   ip-10-0-1-40.ec2.internal   Ready               Active              Leader              19.03.6
+
+# Шаг 3. Create a Swarm Service
+[cloud_user@ip-10-0-1-40 ~]$ docker service create -d \
+> --name nginx_service \
+> -p 8080:80 \
+> --replicas 2 \
+> nginx:latest
+mzbdzv9b8m5k5ohtsyyoo4jc3
+
+[cloud_user@ip-10-0-1-40 ~]$ docker service ls # Проверка, что сервис появились
+ID                  NAME                MODE                REPLICAS            IMAGE               PORTS
+mzbdzv9b8m5k        nginx_service       replicated          2/2                 nginx:latest        *:8080->80/tcp
+
+После этого NGINX будет установлен на Manager и на Worker и доступен по Public IP Manager`a http://35.175.116.199:8080/ 
+
+###############
+#Lab 2. Creating a Stack with Docker Compose#
+###############
+#Задача:
+#После нескольких месяцев дебатов мы решили создать кулинарный блог. После изучения различных платформ, мы выбрали Wordpress с MySQL. У нас уже есть swarm кластер, где мы размещаем #сайты клиентов. Чтобы упростить обслуживание Wordpress, мы решили установить его в виде стека. Нам нужно будет создать файл Docker Compose, развернуть стек и закончить настройку #Wordpress.
+
+#План:
+Complete the Swarm Setup
+On the manager node, go and initialize the Swarm. Get the worker token and have the worker node join the swarm.
+
+Create a Compose File
+In the cloud_user directory of your lab server, create a docker-compose.yml file.
+The version of compose should be set to 3.
+Create two services: db and blog.
+
+DB Service
+The db service will use the mysql image tagged to 5.7.
+Create a volume called db_data and mount it in /var/lib/mysql.
+Make sure the service is attached to the mysql_internal network. Configure the following environment variables:
+	Set MYSQL_ROOT_PASSWORD to P4ssw0rd0!
+	Set MYSQL_DATABASE to wordpress
+	Set MYSQL_USER to wordpress
+	Set MYSQL_PASSWORD to P4ssw0rd0!
+	
+Blog Service
+Make sure that the db service comes online first.
+Use the latest wordpress image.
+The service should be attached to the mysql_internal and wordpress_public networks.
+Publish port 80 on the host to port 80 on the container.
+Configure the following environment variables:
+	Set WORDPRESS_DB_HOST to db:3306
+	Set WORDPRESS_DB to wordpress
+	Set WORDPRESS_DB_USER to wordpress
+	Set WORDPRESS_DB_PASSWORD to P4ssw0rd0!
+
+Volumes
+Create the db_data volume.
+
+Networks
+Configure mysql_internal to be an internal network.
+The wordpress_public network will be public.
+
+Deploy and Test the Stack
+Deploy the stack using the docker-compose.yml file. The stack will be called wp. When the stack comes online, open a browser and access the Wordpress blog using the public IP of the manager. Complete the setup of Wordpress.
+
+#Решение 
+# Шаг 1. Complete the Swarm Setup
+[cloud_user@ip-10-0-1-107 ~]$ docker swarm join-token worker # Узнать ключ на manager, для подключения worker
+To add a worker to this swarm, run the following command:
+    docker swarm join --token SWMTKN-1-3up28618dkupahk35dmgytdicdx81w6a0vz96a7metjpiup95u-85ecgly2vqwz42hh82e3fwmxi 10.0.1.107:2377
+
+[cloud_user@ip-10-0-1-29 ~]$ docker swarm join --token SWMTKN-1-3up28618dkupahk35dmgytdicdx81w6a0vz96a7metjpiup95u-85ecgly2vqwz42hh82e3fwmxi 10.0.1.107:2377 # подключить Worker
+This node joined a swarm as a worker.
+
+[cloud_user@ip-10-0-1-107 ~]$ docker node ls # Проверка состояния swarm
+ID                            HOSTNAME                     STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+pobc5brzugaqjhhbrt2q4s4p7     ip-10-0-1-29.ec2.internal    Ready               Active                                  19.03.2
+i4e7xs2ck1jfljl4zdl33gl4h *   ip-10-0-1-107.ec2.internal   Ready               Active              Leader              19.03.6
+
+# Шаг 2. Create the Compose File
+[cloud_user@ip-10-0-1-107 ~]$ vi docker-compose.yml
+version: '3'
+
+services:
+   db:
+     image: mysql:5.7
+     volumes:
+       - db_data:/var/lib/mysql
+     networks:
+       mysql_internal:
+     environment:
+       MYSQL_ROOT_PASSWORD: P4ssw0rd0!
+       MYSQL_DATABASE: wordpress
+       MYSQL_USER: wordpress
+       MYSQL_PASSWORD: P4ssw0rd0!
+
+   blog:
+     depends_on:
+       - db
+     image: wordpress:latest
+     networks:
+       mysql_internal:
+       wordpress_public:
+     ports:
+       - "80:80"
+     environment:
+       WORDPRESS_DB_HOST: db:3306
+       WORDPRESS_DB_USER: wordpress
+       WORDPRESS_DB_PASSWORD: P4ssw0rd0!
+
+volumes:
+    db_data:
+networks:
+  mysql_internal:
+    internal: true
+  wordpress_public:
+  
+# Шаг 3. Create the Wordpress Blog
+[cloud_user@ip-10-0-1-107 ~]$ docker stack deploy --compose-file docker-compose.yml wp
+Creating network wp_wordpress_public
+Creating network wp_mysql_internal
+Creating service wp_db
+Creating service wp_blog
+
+[cloud_user@ip-10-0-1-107 ~]$ docker service ls # Проверка того, что сервисы заработали
+ID                  NAME                MODE                REPLICAS            IMAGE               PORTS
+wrs42mu8lysx        wp_blog             replicated          1/1                 wordpress:latest    *:80->80/tcp
+knamdr59korg        wp_db               replicated          1/1                 mysql:5.7
+[cloud_user@ip-10-0-1-107 ~]$ docker ps # Один контейнер создался на Manager
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+a111b638f0db        wordpress:latest    "docker-entrypoint.s…"   2 minutes ago       Up 2 minutes        80/tcp              wp_blog.1.n8kwwy1ljg89l2utpmvwv8pl8
+
+[cloud_user@ip-10-0-1-29 ~]$ docker ps # Другой контейнер создался на Worker
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+f9dd6c8d53ee        mysql:5.7           "docker-entrypoint.s…"   2 minutes ago       Up 2 minutes                            wp_db.1.pp1sgwtpymhrmllccsrn21d8p
+
+# Шаг 4. Complete the Wordpress Setup
+После этого Wordpress будет доступен по Public IP Manager`a http://3.86.70.72/wp-admin/install.php
+cloud_user
+SPZrwEePwU

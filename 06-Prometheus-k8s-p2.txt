@@ -1,0 +1,487 @@
+						Run Prometheus on Kubernetes
+###############
+#Setting Up Prometheus#
+###############
+In this lesson, we will set up Prometheus on the Kubernetes cluster. We will be creating:
+	A metrics namespace for our environment to live in
+	A ClusterRole to give Prometheus access to targets using Service Discovery
+	A ConfigMap map that will be used to generate the Prometheus config file
+	A Prometheus Deployment and Service
+	Kube State Metrics to get access to metrics on the Kubernetes API
+	
+You can clone the YAML files from https://github.com/linuxacademy/content-kubernetes-prometheus-env.
+
+# Шаг 1. Скачиваем заготовленные конфиг-файлы с GitHub
+[root@fas1c ~]# yum install -y git
+[root@fas1c ~]# git clone https://github.com/linuxacademy/content-kubernetes-prometheus-env.git # Скачиваем по https
+
+[root@fas1c ~]# cd content-kubernetes-prometheus-env/
+[root@fas1c content-kubernetes-prometheus-env]# ll
+total 8
+drwxr-xr-x 2 root root 4096 Feb 19 06:30 alertmanager
+drwxr-xr-x 3 root root   77 Feb 19 06:30 grafana
+drwxr-xr-x 2 root root 4096 Feb 19 06:30 prometheus
+drwxr-xr-x 2 root root  106 Feb 19 06:30 readrules
+drwxr-xr-x 2 root root   22 Feb 19 06:30 redis
+
+# Шаг 2. Create a file called namespaces.yml. This file will be used to create the monitoring namespace.
+[root@fas1c content-kubernetes-prometheus-env]# cd prometheus/
+[root@fas1c prometheus]# vi namespaces.yml
+{
+  "kind": "Namespace",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "monitoring",
+    "labels": {
+      "name": "monitoring"
+    }
+  }
+}
+[root@fas1c prometheus]# kubectl apply -f namespaces.yml
+namespace/monitoring created
+
+# Шаг 3. Create config-map.yml. Kubernetes will use this file to manage the prometheus.yml configuration file.
+Заменить в строке 17 Private IP на адреса всех участников кластера: ['172.31.17.213:9100', '172.31.28.149:9100']
+[root@fas1c prometheus]# vi prometheus-config-map.yml
+	  1 apiVersion: v1
+      2 kind: ConfigMap
+      3 metadata:
+      4   name: prometheus-server-conf
+      5   labels:
+      6     name: prometheus-server-conf
+      7   namespace: monitoring
+      8 data:
+      9   prometheus.yml: |-
+     10     global:
+     11       scrape_interval: 5s
+     12       evaluation_interval: 5s
+     13
+     14     scrape_configs:
+     15       - job_name: 'node-exporter'
+     16         static_configs:
+     17         - targets: ['<KUBERNETES_IP>:9100', '<KUBERNETES_IP>:9100']
+     18
+     19       - job_name: 'kubernetes-apiservers'
+     20
+     21         kubernetes_sd_configs:
+     22         - role: endpoints
+     23         scheme: https
+     24
+     25         tls_config:
+     26           ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+     27         bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+     28
+     29         relabel_configs:
+     30         - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+     31           action: keep
+     32           regex: default;kubernetes;https
+     33
+     34       - job_name: 'kubernetes-nodes'
+     35
+     36         scheme: https
+     37
+     38         tls_config:
+     39           ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+     40         bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+     41
+     42         kubernetes_sd_configs:
+     43         - role: node
+     44
+     45         relabel_configs:
+     46         - action: labelmap
+     47           regex: __meta_kubernetes_node_label_(.+)
+     48         - target_label: __address__
+     49           replacement: kubernetes.default.svc:443
+     50         - source_labels: [__meta_kubernetes_node_name]
+     51           regex: (.+)
+     52           target_label: __metrics_path__
+     53           replacement: /api/v1/nodes/${1}/proxy/metrics
+     54
+     55
+     56       - job_name: 'kubernetes-pods'
+	 57
+     58         kubernetes_sd_configs:
+     59         - role: pod
+     60
+     61         relabel_configs:
+     62         - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+     63           action: keep
+     64           regex: true
+     65         - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+     66           action: replace
+     67           target_label: __metrics_path__
+     68           regex: (.+)
+     69         - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+     70           action: replace
+     71           regex: ([^:]+)(?::\d+)?;(\d+)
+     72           replacement: $1:$2
+     73           target_label: __address__
+     74         - action: labelmap
+     75           regex: __meta_kubernetes_pod_label_(.+)
+     76         - source_labels: [__meta_kubernetes_namespace]
+     77           action: replace
+     78           target_label: kubernetes_namespace
+     79         - source_labels: [__meta_kubernetes_pod_name]
+     80           action: replace
+     81           target_label: kubernetes_pod_name
+     82
+     83       - job_name: 'kubernetes-cadvisor'
+     84
+     85         scheme: https
+     86
+     87         tls_config:
+     88           ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+     89         bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+     90
+     91         kubernetes_sd_configs:
+     92         - role: node
+     93
+     94         relabel_configs:
+     95         - action: labelmap
+     96           regex: __meta_kubernetes_node_label_(.+)
+     97         - target_label: __address__
+     98           replacement: kubernetes.default.svc:443
+     99         - source_labels: [__meta_kubernetes_node_name]
+    100           regex: (.+)
+    101           target_label: __metrics_path__
+    102           replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+    103
+    104       - job_name: 'kubernetes-service-endpoints'
+    105
+    106         kubernetes_sd_configs:
+    107         - role: endpoints
+    108
+    109         relabel_configs:
+    110         - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+    111           action: keep
+    112           regex: true
+    113         - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scheme]
+    114           action: replace
+    115           target_label: __scheme__
+    116           regex: (https?)
+    117         - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+    118           action: replace
+    119           target_label: __metrics_path__
+    120           regex: (.+)
+    121         - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+    122           action: replace
+    123           target_label: __address__
+    124           regex: ([^:]+)(?::\d+)?;(\d+)
+    125           replacement: $1:$2
+    126         - action: labelmap
+    127           regex: __meta_kubernetes_service_label_(.+)
+    128         - source_labels: [__meta_kubernetes_namespace]
+    129           action: replace
+    130           target_label: kubernetes_namespace
+    131         - source_labels: [__meta_kubernetes_service_name]
+    132           action: replace
+    133           target_label: kubernetes_name
+
+[root@fas1c prometheus]# kubectl apply -f prometheus-config-map.yml
+configmap/prometheus-server-conf created
+
+[root@fas1c prometheus]# kubectl get configmaps # Проверка
+No resources found.
+
+[root@fas1c prometheus]# kubectl get configmaps -n monitoring # Проверка с указанием namespace
+NAME                     DATA      AGE
+prometheus-server-conf   1         1m
+
+[root@fas1c prometheus]# kubectl describe configmaps -n monitoring
+
+# Шаг 4. Create prometheus-deployment.yml. This file will be used to create the Prometheus deployment; which will include the pods, replica sets and volumes.
+[root@fas1c prometheus]# vi prometheus-deployment.yml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: prometheus-deployment
+  namespace: monitoring
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: prometheus-server
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.2.1
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus/"
+            - "--web.enable-lifecycle"
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: prometheus-config-volume
+              mountPath: /etc/prometheus/
+            - name: prometheus-storage-volume
+              mountPath: /prometheus/
+        - name: watch
+          image: weaveworks/watch:master-5b2a6e5
+          imagePullPolicy: IfNotPresent
+          args: ["-v", "-t", "-p=/etc/prometheus", "-p=/var/prometheus", "curl", "-X", "POST", "--fail", "-o", "-", "-sS", "http://localhost:9090/-/reload"]
+          volumeMounts:
+            - name: prometheus-config-volume
+              mountPath: /etc/prometheus
+      volumes:
+        - name: prometheus-config-volume
+          configMap:
+            defaultMode: 420
+            name: prometheus-server-conf
+
+        - name: prometheus-storage-volume
+          emptyDir: {}
+		  
+[root@fas1c prometheus]# kubectl apply -f prometheus-deployment.yml
+deployment.extensions/prometheus-deployment created
+
+[root@fas1c prometheus]# kubectl get pods -n monitoring # Проверка Pods
+NAME                                     READY     STATUS    RESTARTS   AGE
+prometheus-deployment-746f4f9766-5dx68   2/2       Running   0          1m
+
+# Шаг 5. Finally, we will finish off the Prometheus environment by creating a server to make publicly accessible. Create prometheus-service.yml.
+[root@fas1c prometheus]# vi prometheus-service.yml
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-service
+  namespace: monitoring
+  annotations:
+      prometheus.io/scrape: 'true'
+      prometheus.io/port:   '9090'
+
+spec:
+  selector:
+    app: prometheus-server
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: 9090
+      nodePort: 8080
+
+[root@fas1c prometheus]# kubectl apply -f prometheus-service.yml
+service/prometheus-service created
+
+[root@fas1c prometheus]# kubectl get services -n monitoring # Проверка, что сервис создался
+NAME                 TYPE       CLUSTER-IP       EXTERNAL-IP   PORT(S)         AGE
+prometheus-service   NodePort   10.110.210.216   <none>        8080:8080/TCP   25s	 
+
+Prometheus будет доступен по http://34.223.108.196:8080/
+
+# Шаг 6. Create the clusterRole.yml file to set up access so Prometheus can access metrics using Service Discovery.
+[root@fas1c prometheus]# vi clusterRole.yml
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/proxy
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - extensions
+  resources:
+  - ingresses
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: monitoring
+
+[root@fas1c prometheus]# kubectl apply -f clusterRole.yml
+clusterrole.rbac.authorization.k8s.io/prometheus created
+clusterrolebinding.rbac.authorization.k8s.io/prometheus created
+
+# Шаг 7. Create the Kube State Metrics pod to get access to metrics on the Kubernetes API.
+[root@fas1c prometheus]# vi kube-state-metrics.yml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-state-metrics
+  namespace: monitoring
+  labels:
+    app: kube-state-metrics
+  annotations:
+    prometheus.io/scrape: 'true'
+spec:
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app: kube-state-metrics
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: monitoring
+  labels:
+    app: kube-state-metrics
+spec:
+  replicas: 1
+  template:
+    metadata:
+      name: kube-state-metrics-main
+      labels:
+        app: kube-state-metrics
+    spec:
+      containers:
+        - name: kube-state-metrics
+          image: quay.io/coreos/kube-state-metrics:latest
+          ports:
+          - containerPort: 8080
+            name: metrics
+
+[root@fas1c prometheus]# kubectl apply -f kube-state-metrics.yml
+service/kube-state-metrics created
+deployment.extensions/kube-state-metrics created
+
+https://github.com/kubernetes/kube-state-metrics - это лучший способ собирать метрики по Kubernetes API
+
+###############
+#Configuring Prometheus#
+###############
+Описание конфигурационного файла prometheus.conf, созданного  Config Map.
+
+https://prometheus.io/docs/prometheus/latest/configuration/configuration/
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'kubernetes-apiservers'
+
+    kubernetes_sd_configs:
+    - role: endpoints
+    scheme: https
+
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+      action: keep
+      regex: default;kubernetes;https
+
+  - job_name: 'kubernetes-nodes'
+
+    scheme: https
+
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
+    kubernetes_sd_configs:
+    - role: node
+
+    relabel_configs:
+    - action: labelmap
+      regex: __meta_kubernetes_node_label_(.+)
+    - target_label: __address__
+      replacement: kubernetes.default.svc:443
+    - source_labels: [__meta_kubernetes_node_name]
+      regex: (.+)
+      target_label: __metrics_path__
+      replacement: /api/v1/nodes/${1}/proxy/metrics
+
+
+  - job_name: 'kubernetes-pods'
+
+    kubernetes_sd_configs:
+    - role: pod
+
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+      action: keep
+      regex: true
+    - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+      action: replace
+      target_label: __metrics_path__
+      regex: (.+)
+    - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+      action: replace
+      regex: ([^:]+)(?::\d+)?;(\d+)
+      replacement: $1:$2
+      target_label: __address__
+    - action: labelmap
+      regex: __meta_kubernetes_pod_label_(.+)
+    - source_labels: [__meta_kubernetes_namespace]
+      action: replace
+      target_label: kubernetes_namespace
+    - source_labels: [__meta_kubernetes_pod_name]
+      action: replace
+      target_label: kubernetes_pod_name
+
+  - job_name: 'kubernetes-cadvisor'
+
+    scheme: https
+
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
+    kubernetes_sd_configs:
+    - role: node
+
+    relabel_configs:
+    - action: labelmap
+      regex: __meta_kubernetes_node_label_(.+)
+    - target_label: __address__
+      replacement: kubernetes.default.svc:443
+    - source_labels: [__meta_kubernetes_node_name]
+      regex: (.+)
+      target_label: __metrics_path__
+      replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+
+  - job_name: 'kubernetes-service-endpoints'
+
+    kubernetes_sd_configs:
+    - role: endpoints
+
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+      action: keep
+      regex: true
+    - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scheme]
+      action: replace
+      target_label: __scheme__
+      regex: (https?)
+    - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+      action: replace
+      target_label: __metrics_path__
+      regex: (.+)
+    - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+      action: replace
+      target_label: __address__
+      regex: ([^:]+)(?::\d+)?;(\d+)
+      replacement: $1:$2
+    - action: labelmap
+      regex: __meta_kubernetes_service_label_(.+)
+    - source_labels: [__meta_kubernetes_namespace]
+      action: replace
+      target_label: kubernetes_namespace
+    - source_labels: [__meta_kubernetes_service_name]
+      action: replace
+      target_label: kubernetes_name
+	  

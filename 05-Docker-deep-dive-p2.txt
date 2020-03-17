@@ -1,0 +1,740 @@
+											#####Building and Distributing Images#####
+###############
+#Building Images#
+###############
+docker image build -t <NAME>:<TAG> .
+Useful flags:
+	-f, --file string: This is the name of the Dockerfile (Default is PATH/Dockerfile).
+	--force-rm: Always remove intermediate containers.
+	--label list: Set metadata for an image.
+	--rm: Remove intermediate containers after a successful build (default is true).
+	--ulimit ulimit: This sets ulimit options (default is []).
+
+# Пример 1. Указание на нестандартный Dockerfile
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ cd weather-app/
+[fas@localhost weather-app]$ cp Dockerfile Dockerfile.test
+
+[fas@localhost weather-app]$ docker image build -t linuxacademy/weather-app:path-example1 -f Dockerfile.test .
+[fas@localhost weather-app]$ docker image build -t linuxacademy/weather-app:path-example2 --label com.linuxacademy.version=v1.8 -f Dockerfile.test .
+
+[fas@localhost weather-app]$ docker images | grep path
+linuxacademy/weather-app           path-example2       9d3790a02c98        2 minutes ago       960MB
+linuxacademy/weather-app           path-example1       369aee87b11e        8 hours ago         960MB
+
+# Пример 2. Использование текстового описания c VOLUME
+[fas@localhost weather-app]$ cd ~
+[fas@localhost ~]$ docker image build -t linuxacademy/nginx:stind --rm -<<EOF
+> FROM nginx:latest
+> VOLUME ["/usr/share/nginx/html/"] # Создание точки монтирования
+> EOF
+Sending build context to Docker daemon  2.048kB
+Step 1/2 : FROM nginx:latest
+ ---> c7460dfcab50
+Step 2/2 : VOLUME ["/usr/share/nginx/html/"]
+ ---> Using cache
+ ---> ec9b4aaaccf3
+Successfully built ec9b4aaaccf3
+Successfully tagged linuxacademy/nginx:stind
+[fas@localhost ~]$ docker images | grep stind
+linuxacademy/nginx                 stind               ec9b4aaaccf3        21 hours ago        126MB
+
+# Пример 3. Использование URL
+	docker image build -t <NAME>:<TAG> <GIT_URL>#<REF>
+	docker image build -t <NAME>:<TAG> <GIT_URL>#:<DIRECTORY>
+	docker image build -t <NAME>:<TAG> <GIT_URL>#<REF>:<DIRECTORY>
+
+[fas@localhost ~]$ docker image build -t linuxacademy/weather-app:github https://github.com/linuxacademy/content-weather-app.git#remote-build # Обращение к ветке remote-build на GitHub
+
+Содержание ветки remote-build на GitHub (как мы делали в других примерах):
+src	Add files for remote builds	12 months ago 
+Dockerfile	Update Dockerfile	11 months ago
+
+Нужно следить за версией git (старше 2)
+
+# Пример 3. Использование ZIP-файла
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ mkdir tar_image
+[fas@localhost docker_images]$ cd tar_image
+[fas@localhost tar_image]$ git clone https://github.com/linuxacademy/content-weather-app.git # Клонируем репозиторий
+[fas@localhost tar_image]$ cd content-weather-app
+[fas@localhost content-weather-app]$ git branch -a # Проверяем ветки
+* master
+  remotes/origin/HEAD -> origin/master
+  remotes/origin/compose
+  remotes/origin/compose-lab
+  remotes/origin/dockerignore
+  remotes/origin/lab
+  remotes/origin/master
+  remotes/origin/remote-build
+[fas@localhost content-weather-app]$ git checkout remote-build № меняем ветку
+Branch remote-build set up to track remote branch remote-build from origin.
+Switched to a new branch 'remote-build'
+[fas@localhost content-weather-app]$ ls
+Dockerfile  src
+[fas@localhost content-weather-app]$ tar -zcvf weather-app.tar.gz Dockerfile src # Создаем архив
+Dockerfile
+src/
+src/app.js
+src/bin/
+src/bin/www
+src/config.js
+src/package-lock.json
+src/package.json
+src/public/
+src/public/stylesheets/
+src/public/stylesheets/style.css
+src/routes/
+src/routes/index.js
+src/views/
+src/views/error.ejs
+src/views/index.ejs
+[fas@localhost content-weather-app]$ docker image build -t linuxacademy/weather-app:from-tar - < weather-app.tar.gz # Создаем build
+
+[fas@localhost content-weather-app]$ docker images | grep tar # Проверка
+linuxacademy/weather-app           from-tar            afe66062b470        18 seconds ago      960MB
+
+###############
+#Using Multi-Stage Builds#
+###############
+Помогает уменьшить размер финального image:
+	By default, the stages are not named
+	Stages are numbered with integers
+	Starting with 0 for the first FROM instruction
+	Name the stage by adding as to the FROM instruction
+	Reference the stage name in the COPY instruction
+
+# Шаг 1. Подготовка окружения
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ mkdir multi-stage-builds
+[fas@localhost docker_images]$ cd multi-stage-builds/
+[fas@localhost multi-stage-builds]$ git clone https://github.com/linuxacademy/content-weather-app.git src
+Cloning into 'src'...
+remote: Enumerating objects: 35, done.
+remote: Total 35 (delta 0), reused 0 (delta 0), pack-reused 35
+Unpacking objects: 100% (35/35), done.
+
+# Шаг 2. Построение Dockerfile
+# Create an image for the weather-app using multi-stage build
+FROM node AS build # Первый билд, в который просто копируем код и устанавливаем npm-зависимости 
+RUN mkdir -p /var/node/
+ADD src/ /var/node/
+WORKDIR /var/node
+RUN npm install
+
+FROM node:alpine # Второй билд, в который копируем приложение из первого билда и запускаем приложение
+ARG VERSION=V1.1
+LABEL org.label-schema.version=$VERSION
+ENV NODE_ENV="production"
+COPY --from=build /var/node /var/node
+WORKDIR /var/node
+EXPOSE 3000
+ENTRYPOINT ["./bin/www"]
+
+# Шаг 3. Построение images
+[fas@localhost multi-stage-builds]$ docker image build -t linuxacademy/weather-app:multi-stage-build --rm --build-arg VERSION=1.5 . # C изменением значения аргумента с 1.1 в Dockerfile до 1.5
+
+# Шаг 4. Запуск контейнера
+[fas@localhost multi-stage-builds]$ docker container run -d --name multi-stage-build -p 8087:3000 linuxacademy/weather-app:multi-stage-build
+
+# Шаг 5. Вывод
+[fas@localhost multi-stage-builds]$ docker image ls
+REPOSITORY                         TAG                 IMAGE ID            CREATED             SIZE
+linuxacademy/weather-app           multi-stage-build   bf32648727fc        17 seconds ago      129MB # Размер созданного приложения много меньше, чем ранее созданные контейнеры с тем же приложением (129 вместо 960)
+linuxacademy/weather-app           from-tar            afe66062b470        26 minutes ago      960MB
+
+###############
+#Tagging#
+###############
+Удобнее будет, если image будет связан с версией commit в GitHub
+
+# Шаг 1. Извлечение номера commit`а
+[fas@localhost multi-stage-builds]$ cd ~
+[fas@localhost ~]$ cd docker_images/
+[fas@localhost docker_images]$ cd weather-app/src/
+[fas@localhost src]$ git log -1 --pretty=%H
+b301a90001b1524de26f9fdd92694e61cf2d3724
+
+# Шаг 2. Создание build c номером commit
+[fas@localhost weather-app]$ docker image build -t linuxacademy/weather-app:b301a90001b1524de26f9fdd92694e61cf2d3724 .
+
+[fas@localhost weather-app]$ docker images | grep b30
+linuxacademy/weather-app           b301a90001b1524de26f9fdd92694e61cf2d3724   369aee87b11e        25 hours ago        960MB
+
+# Шаг 3. Перетэгировать build и обозначить его как latest
+[fas@localhost weather-app]$ docker image tag linuxacademy/weather-app:b301a90001b1524de26f9fdd92694e61cf2d3724 linuxacademy/weather-app:latest
+
+[fas@localhost weather-app]$ docker images | grep latest
+linuxacademy/weather-app           latest                                     369aee87b11e        25 hours ago        960MB # ID тот же
+
+# В итоге будет два image:
+[fas@localhost weather-app]$ docker images
+linuxacademy/weather-app           b301a90001b1524de26f9fdd92694e61cf2d3724   369aee87b11e        25 hours ago        960MB
+linuxacademy/weather-app           latest                                     369aee87b11e        25 hours ago        960MB
+
+###############
+#Distributing Images on Docker Hub#
+###############
+Create a Docker Hub account:
+	https://hub.docker.com/
+
+Creating an image for Docker Hub:
+	docker image tag <IMAGE_NAME>:<TAG> <linuxacademy>/<IMAGE_NAME>:<TAG>
+
+Set up your environment:
+	cd docker_images
+	mkdir dockerhub
+	cd dockerhub
+	
+Git the weather-app code:
+	git clone https://github.com/linuxacademy/content-weather-app.git src
+
+Create the Dockerfile:
+	vi Dockerfile
+
+		# Create an image for the weather-app using multi-stage build
+		FROM node AS build
+		RUN mkdir -p /var/node/
+		ADD src/ /var/node/
+		WORKDIR /var/node
+		RUN npm install
+
+		FROM node:alpine
+		ARG VERSION=V1.1
+		LABEL org.label-schema.version=$VERSION
+		ENV NODE_ENV="production"
+		COPY --from=build /var/node /var/node
+		WORKDIR /var/node
+		EXPOSE 3000
+		ENTRYPOINT ["./bin/www"]
+
+
+
+Use the Git commit hash as the image tag:
+	cd src
+	git log -1 --pretty=%H
+	cd ../
+
+Build the image:
+	docker image build -t <USERNAME>/weather-app:<HASH> --build-arg VERSION=1.5 .
+
+Tag the image before pushing it to Docker Hub:
+	docker image tag linuxacademy/weather-app:<HASH> <USERNAME>/weather-app:<HASH>
+
+Push the image to Docker Hub:
+	docker login 
+	docker image push <USERNAME>/weather-app:<HASH>
+
+Tag the latest image:
+	docker image tag <USERNAME>/weather-app:<HASH> <USERNAME>/weather-app:latest
+
+Push the latest image to Docker Hub:
+	docker login <USERNAME>
+	docker image push <USERNAME>/weather-app:latest
+	
+###############
+#Lab. Creating Images Using a Dockerfile#
+###############
+In the /home/cloud_user/ directory, you will find the weather-app. Navigate to it. In that directory you will find the source code to the weather-app in src.
+
+Create the Dockerfile
+Create a Dockerfile that will use a multi-stage build. The first stage will use node as the base image, and will be called source.
+
+	Change the directory to weather-app.
+	Create and edit a Dockerfile file.
+		In the file, create a directory for the source code: /node/weather-app.
+		Add the code from src to /node/weather-app on the image.
+		Set /node/weather-app as the working directory.
+		Execute an npm install to install the dependencies.
+		The second stage will use node:alpine as the base image.
+		Create an argument called APP_VERSION that will set the version of the application.
+		Set an environment variable called NODE_ENV and set it to production.
+		Copy /node/weather-app from the source build stage to /var/weather-app.
+		Set /var/weather-app as the working directory.
+		Expose port 3000.
+		Set ./bin/www as the entrypoint.
+	Save the changes to the file.
+
+Build the weather-app image
+	In the src directory, execute git log -1 --pretty=%H to get the commit hash.
+	Use the commit hash as the tag when you execute the image build.
+	Using the build argument, flag set APP_VERSION to 2.0.
+
+Deploy a test container using the image.
+	Create a container called weather-app using the image you just built, and run it as a background process.
+		Publish port 8080 to 3000 on the container.
+	Execute curl localhost:8080 to test the container.
+
+Create a Dockerfile.
+	Change directory to weather-app.
+		cd weather-app/
+		
+Open the editor:
+	vi Dockerfile
+
+Enter the Dockerfile contents:
+ FROM node AS source
+ RUN mkdir -p /node/weather-app
+ ADD src/ /node/weather-app
+ WORKDIR /node/weather-app
+ RUN npm install
+
+ FROM node:alpine
+ ARG APP_VERSION=V1.1
+ LABEL org.label-schema.version=$APP_VERSION
+ ENV NODE_ENV="production"
+ COPY --from=source /node/weather-app /node/weather-app
+ WORKDIR /node/weather-app
+ EXPOSE 3000
+ ENTRYPOINT ["./bin/www"]
+
+Build the image.
+	Change to the source directory:
+		cd src
+	
+	Enter the following to get the Git commit hash:
+		git log -1 --pretty=%H
+	
+	Drop back to the weather-app directory:
+		cd ../
+	
+	Build the image:
+		sudo docker image build -t linuxacademy/weather-app:<HASH> --build-arg APP_VERSION=2.0 .
+
+Deploy a test container using the image just created.
+	Create the weather-app container:
+		sudo docker container run -d --name weather-app -p 8080:3000 linuxacademy/weather-app:<HASH>
+	
+	Make sure the container is running.
+		docker container ls
+	
+	Verify everything is working properly.
+		curl localhost:8080	
+
+###############
+#Lab. Creating Images Using a Dockerfile#
+###############	
+At the command line, login into Docker Hub.
+Navigate to the src directory in weather-app.
+Execute git log -1 --pretty=%H to get the commit hash.
+Drop back down to the weather-app directory.
+Build the image and tag it with [USERNAME]/my-weather-app:[COMMIT_HASH]. You will need to set the VERSION build argument and set it to 1.5.
+Then tag it as latest. Push both images to Docker Hub.
+
+The Scenario
+We've just completed building a Dockerfile, and we're ready to push it to Docker Hub. We need to build our image with the VERSION build argument that is set to 1.5, then tag the image to latest, and finally push both images to Docker Hub.
+
+Logging Into the Lab
+First make sure that you have a Docker Hub account. We'll need it to complete the lab. Then log into the environment using the credentials provided on the lab overview page, either in a terminal session on your local machine or by clicking Instant Terminal.
+
+Log in to Docker Hub
+	Login to Docker Hub:
+		[cloud_user@host]$ docker login -u [DOCKER_HUB_USERNAME]
+
+Get the Git Commit Hash
+	Use Git commit hash as the image tag:
+		[cloud_user@host]$ cd weather-app
+		[cloud_user@host]$ cd src
+		[cloud_user@host]$ git log -1 --pretty=%H
+			The next line will be the has we need.
+
+Build the weather-app Image
+Now let's move up a directory and build the image:
+	[cloud_user@host]$ cd ../
+	[cloud_user@host]$ docker image build -t [USERNAME]/weather-app:[HASH] --build-arg VERSION=1.5 .
+
+Tag the weather-app Image as Latest
+	[cloud_user@host]$ docker image tag [USERNAME]/weather-app:[HASH] [USERNAME]/weather-app:latest
+
+Push Both Images to Docker Hub
+	[cloud_user@host]$ docker image push [USERNAME]/weather-app:[HASH]
+	[cloud_user@host]$ docker image push [USERNAME]/weather-app:latest
+	
+											#####Managing Images#####
+###############
+#Image History#
+###############					
+[fas@localhost ~]$ docker image history linuxacademy/weather-app:multi-stage-build
+IMAGE               CREATED             CREATED BY                                      SIZE                COMMENT
+bf32648727fc        3 hours ago         /bin/sh -c #(nop)  ENTRYPOINT ["./bin/www"]     0B								# из Dockerfile
+bb0e7920c68f        3 hours ago         /bin/sh -c #(nop)  EXPOSE 3000                  0B								# из Dockerfile
+d0b1abe1d3bc        3 hours ago         /bin/sh -c #(nop) WORKDIR /var/node             0B								# из Dockerfile
+ecc2a555d5b4        3 hours ago         /bin/sh -c #(nop) COPY dir:6bc5dfce80a426eaf…   16.7MB							# из Dockerfile
+2ecdfd71415f        3 hours ago         /bin/sh -c #(nop)  ENV NODE_ENV=production      0B								# из Dockerfile
+f2207f10e817        3 hours ago         /bin/sh -c #(nop)  LABEL org.label-schema.ve…   0B								# из Dockerfile
+e650e91256cc        3 hours ago         /bin/sh -c #(nop)  ARG VERSION=V1.1             0B								# из Dockerfile
+b809734bb743        33 hours ago        /bin/sh -c #(nop)  CMD ["node"]                 0B								# из Dockerfile
+<missing>           33 hours ago        /bin/sh -c #(nop)  ENTRYPOINT ["docker-entry…   0B								# При создании образа
+<missing>           33 hours ago        /bin/sh -c #(nop) COPY file:238737301d473041…   116B							# При создании образа
+<missing>           33 hours ago        /bin/sh -c apk add --no-cache --virtual .bui…   5.35MB							# При создании образа
+<missing>           33 hours ago        /bin/sh -c #(nop)  ENV YARN_VERSION=1.21.1      0B								# При создании образа
+<missing>           33 hours ago        /bin/sh -c addgroup -g 1000 node     && addu…   102MB							# При создании образа
+<missing>           33 hours ago        /bin/sh -c #(nop)  ENV NODE_VERSION=13.7.0      0B								# При создании образа
+<missing>           6 days ago          /bin/sh -c #(nop)  CMD ["/bin/sh"]              0B								# При создании образа
+<missing>           6 days ago          /bin/sh -c #(nop) ADD file:e69d441d729412d24…   5.59MB							# При создании образа
+
+[fas@localhost ~]$ docker image history --no-trunc linuxacademy/weather-app:v1 # Показать историю без сокращений
+IMAGE                                                                     CREATED             CREATED     	SIZE                COMMENT
+sha256:369aee87b11ef9a19a1229c94a67b8524c5f64686766097512362e5fb6be5dd0   27 hours ago        /bin/sh -c #(nop)  CMD ["/bin/sh" "-c" "./bin/www"]                                                             
+
+[fas@localhost ~]$ docker image history --no-trunc linuxacademy/weather-app:v1 > output.txt # Вывод в файл
+[fas@localhost ~]$ vi output.txt	
+
+[fas@localhost ~]$ docker image history --quiet linuxacademy/weather-app:v1 # Вывод только image ID
+369aee87b11e
+ef76aa42903e
+895b733c4598
+cba94ff63cc9
+30683243e973
+773cb749d337
+60c4cd896acf
+2a0d8959c8e1
+<missing>
+<missing>
+
+[fas@localhost ~]$ docker image history --quiet --no-trunc linuxacademy/weather-app:v1 # Вывод только расширенного image ID
+sha256:369aee87b11ef9a19a1229c94a67b8524c5f64686766097512362e5fb6be5dd0
+sha256:ef76aa42903e632da621a7141747f6ab39ad02340e71267c80553795ca3aaa7a
+sha256:895b733c4598624c2ec0879964cb3775a25d12c060817f80dc758ccd73209cd2
+sha256:cba94ff63cc9decb465cd88777108cfd88c66a21f070d90540700849b8600528
+sha256:30683243e973d42f7e7071f1008a86f717d2c716902a542bbacae9afddabbbb1
+sha256:773cb749d337c3962cc5dedc3216d426be66de12419d3271baf3e6b53058b8ac
+sha256:60c4cd896acff1d1ea2cda60c16b85d8f800b9264df6ae0811d2b01beb3d0069
+sha256:2a0d8959c8e1b967d926059e555fdd23926c8fff809a0cf5fab373e694bbce64
+<missing>
+<missing>
+
+###############
+#Saving and Loading Images#
+###############	
+Позволяет хранить image в качестве tar-архива, то есть как артифакт
+
+[fas@localhost ~]$ mkdir output
+[fas@localhost ~]$ cd output
+
+[fas@localhost output]$ docker image save ubuntu:18.04 --output ubuntu.tar # Сохраняем image в качестве tar-файла
+[fas@localhost output]$ ll
+total 65044
+-rw-------. 1 fas fas 66601984 Jan 24 06:31 ubuntu.tar
+
+[fas@localhost output]$ tar tvf ubuntu.tar # Смотрим содержимое архива
+drwxr-xr-x root/root         0 2020-01-15 20:20 133a053ab717365e639c4bf51286123f6bb8b7f1c4aba77a703fd7418aceec48/
+-rw-r--r-- root/root         3 2020-01-15 20:20 133a053ab717365e639c4bf51286123f6bb8b7f1c4aba77a703fd7418aceec48/VERSION
+-rw-r--r-- root/root       406 2020-01-15 20:20 133a053ab717365e639c4bf51286123f6bb8b7f1c4aba77a703fd7418aceec48/json
+-rw-r--r-- root/root  65571328 2020-01-15 20:20 133a053ab717365e639c4bf51286123f6bb8b7f1c4aba77a703fd7418aceec48/layer.tar # Это архивные копии разных слоев
+drwxr-xr-x root/root         0 2020-01-15 20:20 39839d22db123ec4483dd5e2a7837c52598c3f245a9fdef0723e64a5b10d47ec/
+-rw-r--r-- root/root         3 2020-01-15 20:20 39839d22db123ec4483dd5e2a7837c52598c3f245a9fdef0723e64a5b10d47ec/VERSION
+-rw-r--r-- root/root       482 2020-01-15 20:20 39839d22db123ec4483dd5e2a7837c52598c3f245a9fdef0723e64a5b10d47ec/json
+-rw-r--r-- root/root     15872 2020-01-15 20:20 39839d22db123ec4483dd5e2a7837c52598c3f245a9fdef0723e64a5b10d47ec/layer.tar
+drwxr-xr-x root/root         0 2020-01-15 20:20 bd59bf76c677d02b426c1eac67f4cefcd0c5c707fa18f6abc4db41070d77e63a/
+-rw-r--r-- root/root         3 2020-01-15 20:20 bd59bf76c677d02b426c1eac67f4cefcd0c5c707fa18f6abc4db41070d77e63a/VERSION
+-rw-r--r-- root/root       482 2020-01-15 20:20 bd59bf76c677d02b426c1eac67f4cefcd0c5c707fa18f6abc4db41070d77e63a/json
+-rw-r--r-- root/root    991232 2020-01-15 20:20 bd59bf76c677d02b426c1eac67f4cefcd0c5c707fa18f6abc4db41070d77e63a/layer.tar
+-rw-r--r-- root/root      3407 2020-01-15 20:20 ccc6e87d482b79dd1645affd958479139486e47191dfe7a997c862d89cd8b4c0.json
+drwxr-xr-x root/root         0 2020-01-15 20:20 f78587b8146af552a4b391558c48c72ebdda69746b2b82896989f163f3c5046b/
+-rw-r--r-- root/root         3 2020-01-15 20:20 f78587b8146af552a4b391558c48c72ebdda69746b2b82896989f163f3c5046b/VERSION
+-rw-r--r-- root/root      1263 2020-01-15 20:20 f78587b8146af552a4b391558c48c72ebdda69746b2b82896989f163f3c5046b/json
+-rw-r--r-- root/root      3072 2020-01-15 20:20 f78587b8146af552a4b391558c48c72ebdda69746b2b82896989f163f3c5046b/layer.tar
+-rw-r--r-- root/root       432 1969-12-31 19:00 manifest.json
+-rw-r--r-- root/root        88 1969-12-31 19:00 repositories
+[fas@localhost output]$ ll
+total 65044
+-rw-------. 1 fas fas 66601984 Jan 24 06:31 ubuntu.tar
+
+[fas@localhost output]$ gzip ubuntu.tar # Сжимаем архив
+[fas@localhost output]$ ll
+total 25276
+-rw-------. 1 fas fas 25881096 Jan 24 06:31 ubuntu.tar.gz
+
+[fas@localhost output]$ docker images | grep ubuntu
+ubuntu                             18.04                                      ccc6e87d482b        8 days ago          64.2MB
+[fas@localhost output]$ docker image rm ubuntu:18.04 # Удаляем image
+[fas@localhost output]$ docker images | grep ubuntu
+
+[fas@localhost output]$ docker image load --input weather-app-latest.tar.gz # Востанавливаем image из архива
+open weather-app-latest.tar.gz: no such file or directory
+[fas@localhost output]$ docker image load --input ubuntu.tar.gz
+43c67172d1d1: Loading layer [==================================================>]  65.57MB/65.57MB
+21ec61b65b20: Loading layer [==================================================>]  991.2kB/991.2kB
+1d0dfb259f6a: Loading layer [==================================================>]  15.87kB/15.87kB
+f55aa0bd26b8: Loading layer [==================================================>]  3.072kB/3.072kB
+Loaded image: ubuntu:18.04
+
+[fas@localhost output]$ docker images | grep ubuntu
+ubuntu                             18.04                                      ccc6e87d482b        8 days ago          64.2MB
+
+
+
+											#####Building and Distributing Images#####
+###############
+#Inspecting Container Processes#
+###############
+[fas@localhost ~]$ docker container run -itd --name container_process centos:latest /bin/bash # Запустить контейнер и выполнить /bin/bash | запущен интерактивно, но фоном ЗАЧЕМ ЭТО??????
+b9b05dacb320ea15982ca2c8e8b650ed7b7e80a69fc0d433c7c1e1a31b3b651a
+[fas@localhost ~]$ docker ps
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+b9b05dacb320        centos:latest       "/bin/bash"         8 seconds ago       Up 7 seconds                            container_process
+
+!Примечание
+docker container run -d --name container_test centos:latest /bin/bash # Контейнер стартанет и сразу выключится	
+docker container run -d --name container_test centos:latest /bin/bash # Мы будем находиться в контейнере, как только выйдем, контейнер сразу выключится
+docker container run -itd --name container_process centos:latest /bin/bash # Оба флага позволят контейнеру работать фоном
+
+[fas@localhost ~]$ docker container top container_process # Загрузка процессора
+UID                 PID                 PPID                C                   STIME               TTY                 TIME                CMD
+root                8196                8175                0                   08:04               pts/0               00:00:00            /bin/bash
+
+[fas@localhost ~]$ docker container exec -it container_process /bin/bash # Зайти в контейнер
+[root@b9b05dacb320 /]# top
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+    1 root      20   0   16672   2428   1784 S   0.0   0.2   0:00.04 bash # Появился в самом начале после docker container run -itd --name container_process centos:latest /bin/bash
+   15 root      20   0   16672   2412   1772 S   0.0   0.2   0:00.03 bash # После захода в контейнер
+   28 root      20   0   53072   2428   1668 R   0.0   0.2   0:00.01 top  # Выполнили, зайдя в контейнер
+
+[fas@localhost ~]$ docker container attach container_process
+[root@b9b05dacb320 /]# top
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND # После attach только один bash процессора
+   30 root      20   0   53072   2416   1668 R   0.3   0.2   0:00.01 top # Выполнили, зайдя в контейнер
+    1 root      20   0   16672   2428   1784 S   0.0   0.2   0:00.04 bash 
+	
+[fas@localhost ~]$ docker ps # После выхода контейнер выключился
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+	
+[fas@localhost ~]$ docker container start container_process # Запускаем контейнер заново
+container_process
+[fas@localhost ~]$ docker ps
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+b9b05dacb320        centos:latest       "/bin/bash"         54 minutes ago      Up 3 seconds                            container_process
+
+[fas@localhost ~]$ docker container stats container_process # Проверяем загрузку контейнера
+CONTAINER ID        NAME                CPU %               MEM USAGE / LIMIT   MEM %               NET I/O             BLOCK I/O           PIDS
+b9b05dacb320        container_process   0.00%               648KiB / 991MiB     0.06%               656B / 0B           0B / 0B             1
+
+В параллельном окне можно выполнить yum install внутри процессора и наблюдать загрузку контейнера
+
+###############
+#Having Containers Start Automatically#
+###############
+Типы автоматической перезагрузки контейнеров:
+	no: Do not automatically restart the container. (the default)
+	on-failure: Restart the container if it exits due to an error, which manifests as a non-zero exit code.
+	always: Always restart the container if it stops.
+	unless-stopped: Similar to always, except that when the container is stopped, it is not restarted even after the Docker daemon restarts.
+	
+[fas@localhost ~]$ docker container run -d --name always-restart --restart always rivethead42/weather-app:latest
+[fas@localhost ~]$ docker container run -d --name unless-stopped --restart unless-stopped rivethead42/weather-app:latest
+
+# Сценарий 1. Просто перезагружаем службу docker
+[fas@localhost ~]$ docker ps
+CONTAINER ID        IMAGE                            COMMAND             CREATED             STATUS              PORTS               NAMES
+612e9826c485        rivethead42/weather-app:latest   "./bin/www"         40 seconds ago      Up 39 seconds       3000/tcp            unless-stopped
+4a7bac302aa4        rivethead42/weather-app:latest   "./bin/www"         3 minutes ago       Up 3 minutes        3000/tcp            always-restart
+
+[root@localhost ~]# systemctl status docker # Перезапуск службы docker
+
+[fas@localhost ~]$ docker ps # Оба контейнера автоматически перезагрузились
+CONTAINER ID        IMAGE                            COMMAND             CREATED             STATUS              PORTS               NAMES
+612e9826c485        rivethead42/weather-app:latest   "./bin/www"         3 minutes ago       Up About a minute   3000/tcp            unless-stopped
+4a7bac302aa4        rivethead42/weather-app:latest   "./bin/www"         5 minutes ago       Up About a minute   3000/tcp            always-restart
+
+# Сценарий 2. Перезагружаем службу docker, прадварительно остановив контейнер с флагом --restart unless-stopped
+[fas@localhost ~]$ docker container stop unless-stopped
+unless-stopped
+[fas@localhost ~]$ docker ps
+CONTAINER ID        IMAGE                            COMMAND             CREATED             STATUS              PORTS               NAMES
+4a7bac302aa4        rivethead42/weather-app:latest   "./bin/www"         7 minutes ago       Up 2 minutes        3000/tcp            always-restart
+
+[root@localhost ~]# systemctl status docker # Перезапуск службы docker
+
+[fas@localhost ~]$ docker ps # Контейнер с флагом --restart unless-stopped не перезапустился
+CONTAINER ID        IMAGE                            COMMAND             CREATED             STATUS              PORTS               NAMES
+4a7bac302aa4        rivethead42/weather-app:latest   "./bin/www"         10 minutes ago      Up 22 seconds       3000/tcp            always-restart
+
+# Сценарий 3. Перезагружаем службу docker, прадварительно остановив контейнер с флагом --restart always
+
+[fas@localhost ~]$ docker container stop always-restart
+always-restart
+[fas@localhost ~]$ docker ps
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+
+[root@localhost ~]# systemctl status docker # Перезапуск службы docker
+
+[fas@localhost ~]$ docker ps  # Контейнер с флагом --restart always перезапустился
+CONTAINER ID        IMAGE                            COMMAND             CREATED             STATUS              PORTS               NAMES
+4a7bac302aa4        rivethead42/weather-app:latest   "./bin/www"         12 minutes ago      Up 6 seconds        3000/tcp            always-restart		
+
+###############
+#Docker Events#
+###############
+https://docs.docker.com/engine/reference/commandline/events/
+https://docs.docker.com/engine/api/v1.24/
+
+[fas@localhost ~]$ docker system events
+^C
+[fas@localhost ~]$ docker system events --since '1h'
+2020-01-27T01:04:10.221052270-05:00 network connect fd4eaef6c157cd1ec7f66337f85d7c09ec5adee040239c792ec64bdb8afd54b5 (container=4a7bac302aa4c68ca392de830f993b19422769ec57789cfd4a6689beedc46850, name=bridge, type=bridge)
+2020-01-27T01:04:10.543150745-05:00 container start 4a7bac302aa4c68ca392de830f993b19422769ec57789cfd4a6689beedc46850 (image=rivethead42/weather-app:latest, name=always-restart, org.label-schema.version=V1.1)
+
+[fas@localhost ~]$ docker container run -itd --name docker_events1 centos /bin/bash
+b3aec65c7fc4836025cc50da09c85a0b379676e5cd419498344b8eb16505f9ee
+
+[fas@localhost ~]$ docker system events
+2020-01-27T01:14:30.090894307-05:00 container create b3aec65c7fc4836025cc50da09c85a0b379676e5cd419498344b8eb16505f9ee (image=centos, name=docker_events1, org.label-schema.build-date=20200114, org.label-schema.license=GPLv2, org.label-schema.name=CentOS Base Image, org.label-schema.schema-version=1.0, org.label-schema.vendor=CentOS, org.opencontainers.image.created=2020-01-14 00:00:00-08:00, org.opencontainers.image.licenses=GPL-2.0-only, org.opencontainers.image.title=CentOS Base Image, org.opencontainers.image.vendor=CentOS)
+2020-01-27T01:14:30.122920817-05:00 network connect fd4eaef6c157cd1ec7f66337f85d7c09ec5adee040239c792ec64bdb8afd54b5 (container=b3aec65c7fc4836025cc50da09c85a0b379676e5cd419498344b8eb16505f9ee, name=bridge, type=bridge)
+2020-01-27T01:14:30.452741712-05:00 container start b3aec65c7fc4836025cc50da09c85a0b379676e5cd419498344b8eb16505f9ee (image=centos, name=docker_events1, org.label-schema.build-date=20200114, org.label-schema.license=GPLv2, org.label-schema.name=CentOS Base Image, org.label-schema.schema-version=1.0, org.label-schema.vendor=CentOS, org.opencontainers.image.created=2020-01-14 00:00:00-08:00, org.opencontainers.image.licenses=GPL-2.0-only, org.opencontainers.image.title=CentOS Base Image, org.opencontainers.image.vendor=CentOS)
+
+Виды фильтров:
+docker system events --filter type=container --filter event=start --since '1h' # По типу события
+docker system events --filter type=container --filter event=start --since '1h' # По типу и событию		
+
+# Сценарий 1. Запускаем контейнер и фильтр на attach
+[fas@localhost ~]$ docker system events --filter type=container --filter event=attach # Пусто, так как не привязали контейнер
+
+[fas@localhost ~]$ docker container exec -it docker_events1 /bin/bash
+[root@b3aec65c7fc4 /]#
+
+# Сценарий 2. Запускаем контейнер, привязываем его и фильтр на attach
+[fas@localhost ~]$ docker container attach docker_events1
+[root@b3aec65c7fc4 /]#
+
+[fas@localhost ~]$ docker system events --filter type=container --filter event=attach  События есть (смотрим в параллкльном окне)
+2020-01-27T01:24:13.560400485-05:00 container attach b3aec65c7fc4836025cc50da09c85a0b379676e5cd419498344b8eb16505f9ee (image=centos, name=docker_events1, org.label-schema.build-date=20200114, org.label-schema.license=GPLv2, org.label-schema.name=CentOS Base Image, org.label-schema.schema-version=1.0, org.label-schema.vendor=CentOS, org.opencontainers.image.created=2020-01-14 00:00:00-08:00, org.opencontainers.image.licenses=GPL-2.0-only, org.opencontainers.image.title=CentOS Base Image, org.opencontainers.image.vendor=CentOS)
+
+[fas@localhost ~]$ docker system events --filter type=container --filter event=attach --filter event=die --filter event=stop # Несколько фильтров с events
+
+###############
+#Managing Stopped Container#
+###############
+Remove one or more containers:
+	docker container rm <NAME>
+
+List the rm flags:
+	docker container rm -h
+
+Start one or more stopped containers:
+	docker container start <NAME>
+
+Remove all stopped containers:
+	docker container prune
+
+List the IDs of all containers:
+	docker container ls -a -q
+
+List all stopped containers:
+	docker container ls -a -f status=exited # -f - Filter
+
+List the IDs of stopped containers:
+	docker container ls -a -q -f status=exited
+
+Get a count of all stopped containers:
+	docker container ls -a -q -f status=exited | wc -l # Посчитать количество строк (lines)
+
+Get a listing of our containers:
+	docker container ls -a -f status=exited | grep prometheus
+
+Start Prometheus:
+	docker container start prometheus
+
+Fin stopped weather-app containers with grep:
+	docker container ls -a -f status=exited | grep weather-app
+	
+###############
+#Managing Docker with Portainer#
+###############
+Portainer - утилита для управления контейнерами (как и Swarm)
+https://www.portainer.io/
+https://github.com/portainer/portainer
+
+[fas@localhost ~]$ docker volume create portainer_data # Создать том для Portainer`а
+portainer_data
+
+[fas@localhost ~]$ docker container run -d --name portainer -p 8080:9000 \ # Создаем контейнер, используя image portainer/portainer
+> --restart=always \
+> -v /var/run/docker.sock:/var/run/docker.sock \
+> -v portainer_data:/data portainer/portainer
+
+Unable to find image 'portainer/portainer:latest' locally
+latest: Pulling from portainer/portainer
+d1e017099d17: Pull complete
+cc61cd4105c3: Pull complete
+Digest: sha256:c016f0e9b92b2dd4fe097d91ace2f21ed3ce34ade43ee2a95d3d4da1e984b96f
+Status: Downloaded newer image for portainer/portainer:latest
+bd6bf35256a2bf48e2bed5a353a936526f4a7cb226ffe76f9a62246fcc8b4ff2
+
+[fas@localhost ~]$ docker container ls # Контейнер запущен
+CONTAINER ID        IMAGE                 COMMAND             CREATED             STATUS              PORTS                    NAMES
+bd6bf35256a2        portainer/portainer   "/portainer"        8 seconds ago       Up 8 seconds        0.0.0.0:8080->9000/tcp   portainer
+
+WEB-интерфейс доступен по http://192.168.56.101:8080/#/init/admin
+
+###############
+#Updating Containers with Watchtower#
+###############
+Watchtower - утилита для мониторинга контейнеров
+
+# Шаг 1. Подготовка окружения
+[fas@localhost ~]$ git clone https://github.com/linuxacademy/content-express-demo-app.git watchtower # Скачиваем тестовое приложение
+Cloning into 'watchtower'...
+remote: Enumerating objects: 23, done.
+remote: Total 23 (delta 0), reused 0 (delta 0), pack-reused 23
+Unpacking objects: 100% (23/23), done.
+[fas@localhost ~]$ cd watchtower
+[fas@localhost watchtower]$ git branch -a
+* master
+  remotes/origin/HEAD -> origin/master
+  remotes/origin/dockerfile
+  remotes/origin/master
+[fas@localhost watchtower]$ git checkout dockerfile
+Branch dockerfile set up to track remote branch dockerfile from origin.
+Switched to a new branch 'dockerfile'
+
+[fas@localhost watchtower]$ ls
+app.js  bin  Dockerfile  package.json  public  routes  views
+
+# Шаг 2. Создаем image
+[fas@localhost watchtower]$ docker login -u [USERNAME]
+[fas@localhost watchtower]$ docker image build -t riverhead42/my-express .
+[fas@localhost watchtower]$ docker image push rivethead42/my-express
+
+# Шаг 3. Запуск контейнера
+[fas@localhost watchtower]$ docker container run -d --name watched-app -p 80:3000 --restart always riverhead42/my-express
+[fas@localhost watchtower]$ docker ps
+CONTAINER ID        IMAGE                            COMMAND                  CREATED             STATUS              PORTS                    NAMES
+37cd498d459e        riverhead42/my-express           "docker-entrypoint.s…"   6 seconds ago       Up 5 seconds        0.0.0.0:80->3000/tcp     watched-app
+
+# Шаг 4. Запуск контейнера c Watchtower
+[fas@localhost watchtower]$ docker container run -d --name watchtower \
+> --restart always \
+> -v /var/run/docker.sock:/var/run/docker.sock \
+> v2tec/watchtower -i 15 # Интервалом опроса 15 секунд
+
+[fas@localhost watchtower]$ docker ps
+CONTAINER ID        IMAGE                            COMMAND                  CREATED              STATUS              PORTS                    NAMES
+1025a83de653        v2tec/watchtower                 "/watchtower -i 15"      About a minute ago   Up About a minute                            watchtower
+
+# Шаг 5. Создание dockerignore-файла
+[fas@localhost watchtower]$ vi .dockerignore
+	Dockerfile
+	.git
+	.gitignore
+	
+# Шаг 6. Внести изменения в js-файл кода
+[fas@localhost watchtower]$ vi app.js
+	//This is a comment
+	//
+
+[fas@localhost watchtower]$ touch newfile.js	
+
+# Шаг 7. Создаем image заново
+[fas@localhost watchtower]$ docker image build -t rivethead42/my-express --no-cache . # --no-cache - не использовать предыдущие слои
+docker image push rivethead42/my-express
+
+# Шаг 8. Проверка, что контейнер подхватил новый image
+[fas@localhost watchtower]$ docker ps # Увидим, что контейнер перезапустился с новым image
+CONTAINER ID        IMAGE                            COMMAND                  CREATED             STATUS              PORTS                    NAMES
+1025a83de653        v2tec/watchtower                 "/watchtower -i 15"      11 minutes ago      Up 11 minutes                                watchtower
+37cd498d459e        riverhead42/my-express           "docker-entrypoint.s…"   10 seconds ago      Up 15 minutes       0.0.0.0:80->3000/tcp     watched-app
+
+[fas@localhost watchtower]$ docker container exec -it watched-app /bin/bash
+root@37cd498d459e:/var/node# ls
+Dockerfile  app.js  bin  node_modules  package-lock.json  package.json  public  routes  views newfile.js # Новый файл появился

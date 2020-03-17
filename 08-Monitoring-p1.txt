@@ -1,0 +1,378 @@
+						Creating an Environment
+###############
+#Deploying the Demo Application#
+###############
+# Тип OS - Ubuntu
+# Имя сервера: cloud_user@fas3c
+
+# Шаг 1. Структура папок докерезированного приложения
+cloud_user@fas3c:~$ ls
+forethought  nodesource_setup.sh
+cloud_user@fas3c:~$ ls forethought/
+Dockerfile  index.js  node_modules  nodesource_setup.sh  package-lock.json  package.json  public  views
+
+# Шаг 2. Структура Dockerfile
+cloud_user@fas3c:~$ vi forethought/Dockerfile
+FROM node:10-alpine
+RUN mkdir -p /home/node/app/node_modules && chown -R node:node /home/node/app
+WORKDIR /home/node/app
+COPY package*.json ./
+RUN npm config set registry http://registry.npmjs.org/
+RUN npm install
+COPY . .
+COPY --chown=node:node . .
+USER node
+EXPOSE 8080
+CMD [ "node", "index.js" ]
+
+# Шаг 3. Запуск приложения в Docker
+cloud_user@fas3c:~$ docker image ls # Image уже создан
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+forethought         latest              532cf27aa4eb        12 months ago       74MB
+node                10-alpine           fe6ff768f798        13 months ago       70.7MB
+
+cloud_user@fas3c:~$ docker run --name ft-app -p 80:8080 -d forethought # Запуск контейнера
+d5bdb8f28fbb87004209cf8eb45c80817c6c5475de80216724647ac4ec6643c8
+
+cloud_user@fas3c:~$ docker ps # Проверка
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS                  NAMES
+d5bdb8f28fbb        forethought         "node index.js"     10 seconds ago      Up 8 seconds        0.0.0.0:80->8080/tcp   ft-app
+
+###############
+#Prometheus Setup#
+###############
+# Установка без Docker и без K8s
+# Тип OS - Ubuntu
+# Имя сервера: cloud_user@fas4c
+
+# Шаг 1. Create a system user for Prometheus:
+cloud_user@fas4c:~$ sudo useradd --no-create-home --shell /bin/false prometheus
+[sudo] password for cloud_user:
+
+cloud_user@fas4c:~$ cat /etc/passwd | grep prom
+prometheus:x:1004:1004::/home/prometheus:/bin/false
+
+# Шаг 2. Create the directories in which we'll be storing our configuration files and libraries:
+cloud_user@fas4c:~$ sudo mkdir /etc/prometheus
+cloud_user@fas4c:~$ sudo mkdir /var/lib/prometheus
+
+cloud_user@fas4c:~$ ls -l /etc | grep prom
+drwxr-xr-x 2 root root       4096 Mar  4 13:38 prometheus
+
+cloud_user@fas4c:~$ ls -l /var/lib | grep prom
+drwxr-xr-x  2 root      root      4096 Mar  4 13:38 prometheus
+
+# Шаг 3. Set the ownership of the /var/lib/prometheus directory:
+cloud_user@fas4c:~$ sudo chown prometheus:prometheus /var/lib/prometheus
+
+cloud_user@fas4c:~$ ls -l /var/lib | grep prom
+drwxr-xr-x  2 prometheus prometheus 4096 Mar  4 13:38 prometheus
+
+# Шаг 4. Pull down the tar.gz file from the Prometheus downloads page:
+cloud_user@fas4c:~$ cd /tmp/
+cloud_user@fas4c:/tmp$ wget https://github.com/prometheus/prometheus/releases/download/v2.7.1/prometheus-2.7.1.linux-amd64.tar.gz
+
+cloud_user@fas4c:/tmp$ ls | grep prom
+prometheus-2.7.1.linux-amd64.tar.gz
+
+# Шаг 5. Extract the files:
+cloud_user@fas4c:/tmp$ tar -xvf prometheus-2.7.1.linux-amd64.tar.gz
+
+cloud_user@fas4c:/tmp$ ls | grep prom
+prometheus-2.7.1.linux-amd64
+prometheus-2.7.1.linux-amd64.tar.gz
+
+cloud_user@fas4c:/tmp$ cd prometheus-2.7.1.linux-amd64/
+
+cloud_user@fas4c:/tmp/prometheus-2.7.1.linux-amd64$ ls
+LICENSE  NOTICE  console_libraries  consoles  prometheus  prometheus.yml  promtool
+
+# Шаг 6. Move the configuration file and set the owner to the prometheus user:
+cloud_user@fas4c:/tmp/prometheus-2.7.1.linux-amd64$ sudo mv console* /etc/prometheus
+cloud_user@fas4c:/tmp/prometheus-2.7.1.linux-amd64$ sudo mv prometheus.yml /etc/prometheus
+cloud_user@fas4c:/tmp/prometheus-2.7.1.linux-amd64$ sudo chown -R prometheus:prometheus /etc/prometheus
+
+cloud_user@fas4c:/tmp/prometheus-2.7.1.linux-amd64$ ls -l /etc/ | grep prom
+drwxr-xr-x 4 prometheus prometheus  4096 Mar  4 13:46 prometheus
+
+# Шаг 7. Move the binaries and set the owner:
+cloud_user@fas4c:/tmp/prometheus-2.7.1.linux-amd64$ sudo mv prometheus /usr/local/bin/
+cloud_user@fas4c:/tmp/prometheus-2.7.1.linux-amd64$ sudo mv promtool /usr/local/bin/
+cloud_user@fas4c:/tmp/prometheus-2.7.1.linux-amd64$ sudo chown prometheus:prometheus /usr/local/bin/prometheus
+cloud_user@fas4c:/tmp/prometheus-2.7.1.linux-amd64$ sudo chown prometheus:prometheus /usr/local/bin/promtool
+
+# Шаг 8. Create the service file:
+cloud_user@fas4c:/tmp/prometheus-2.7.1.linux-amd64$ cd ~
+cloud_user@fas4c:~$ sudo vim /etc/systemd/system/prometheus.service
+[Unit]
+Description=Prometheus
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/usr/local/bin/prometheus \
+    --config.file /etc/prometheus/prometheus.yml \
+    --storage.tsdb.path /var/lib/prometheus/ \
+    --web.console.templates=/etc/prometheus/consoles \
+    --web.console.libraries=/etc/prometheus/console_libraries
+
+[Install]
+WantedBy=multi-user.target
+
+# Шаг 9. Reload systemd:
+cloud_user@fas4c:~$ sudo systemctl daemon-reload
+
+# Шаг 10. Start Prometheus, and make sure it automatically starts on boot:
+cloud_user@fas4c:~$ sudo systemctl start prometheus
+cloud_user@fas4c:~$ sudo systemctl enable prometheus
+
+cloud_user@fas4c:~$ sudo systemctl status prometheus
+● prometheus.service - Prometheus
+   Loaded: loaded (/etc/systemd/system/prometheus.service; enabled; vendor preset: enabled)
+   Active: active (running) since Wed 2020-03-04 13:51:03 UTC; 15s ago
+ Main PID: 16314 (prometheus)
+    Tasks: 9 (limit: 2318)
+   CGroup: /system.slice/prometheus.service
+           └─16314 /usr/local/bin/prometheus --config.file /etc/prometheus/prometheus.yml --storage.tsdb.path /var/lib/prometheus/ --web.console.templates=/etc/prometheus/consoles --web.console.libraries=/e
+
+Mar 04 13:51:03 fas4c.mylabserver.com prometheus[16314]: level=info ts=2020-03-04T13:51:03.938999134Z caller=main.go:303 build_context="(go=go1.11.5, user=root@f9f82868fc43, date=20190131-11:16:59)"
+
+# Шаг 11. Visit Prometheus in your web browser at PUBLICIP:9090.
+
+###############
+#Alertmanager Setup#
+###############
+# Шаг 1. Create the alertmanager system user:
+cloud_user@fas4c:~$ sudo useradd --no-create-home --shell /bin/false alertmanager
+[sudo] password for cloud_user:
+
+# Шаг 2. Create the /etc/alertmanager directory:
+cloud_user@fas4c:~$ sudo mkdir /etc/alertmanager
+
+# Шаг 3. Download Alertmanager from the Prometheus downloads page:
+cloud_user@fas4c:~$ cd /tmp/
+cloud_user@fas4c:/tmp$ wget https://github.com/prometheus/alertmanager/releases/download/v0.16.1/alertmanager-0.16.1.linux-amd64.tar.gz
+
+# Шаг 4. Extract the files:
+cloud_user@fas4c:/tmp$ tar -xvf alertmanager-0.16.1.linux-amd64.tar.gz
+
+# Шаг 5. Move the binaries:
+cloud_user@fas4c:/tmp$ cd alertmanager-0.16.1.linux-amd64/
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ ls
+LICENSE  NOTICE  alertmanager  alertmanager.yml  amtool
+
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo mv alertmanager /usr/local/bin/
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo mv amtool /usr/local/bin/
+
+# Шаг 6. Set the ownership of the binaries:
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo chown alertmanager:alertmanager /usr/local/bin/alertmanager
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo chown alertmanager:alertmanager /usr/local/bin/amtool
+
+# Шаг 7. Move the configuration file into the /etc/alertmanager directory:
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo mv alertmanager.yml /etc/alertmanager/
+
+# Шаг 8. Set the ownership of the /etc/alertmanager directory:
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo chown -R alertmanager:alertmanager /etc/alertmanager/
+
+# Шаг 9. Create the alertmanager.service file for systemd:
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo vim /etc/systemd/system/alertmanager.service
+[Unit]
+Description=Alertmanager
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=alertmanager
+Group=alertmanager
+Type=simple
+WorkingDirectory=/etc/alertmanager/
+ExecStart=/usr/local/bin/alertmanager \
+    --config.file=/etc/alertmanager/alertmanager.yml
+[Install]
+WantedBy=multi-user.target
+
+# Шаг 10. Stop Prometheus, and then update the Prometheus configuration file to use Alertmanager:
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo systemctl stop prometheus
+# my global config
+global:
+  scrape_interval:     15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+       - localhost:9093  # раскомметрировать эту строчку и прописать localhost в качестве IP-адреса
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: 'prometheus'
+
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+    - targets: ['localhost:9090']
+	   
+# Шаг 11. Reload systemd, and then start the prometheus and alertmanager services:
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo systemctl daemon-reload
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo systemctl start prometheus
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo systemctl start alertmanager
+
+# Шаг 12. Make sure alertmanager starts on boot:
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo systemctl enable alertmanager
+Created symlink /etc/systemd/system/multi-user.target.wants/alertmanager.service → /etc/systemd/system/alertmanager.service.
+
+# Шаг 13. Visit PUBLICIP:9093 in your browser to confirm Alertmanager is working.
+
+###############
+#Grafana Setup#
+###############
+# Шаг 1. Install the prerequisite package:
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo apt-get install libfontconfig
+
+# Шаг 2. Download and install Grafana using the .deb package provided on the Grafana download page:
+cloud_user@fas4c:$ cd /tmp/
+cloud_user@fas4c:/tmp$ wget https://dl.grafana.com/oss/release/grafana_5.4.3_amd64.deb
+cloud_user@fas4c:/tmp$ sudo dpkg -i grafana_5.4.3_amd64.deb
+# Шаг 3. Ensure Grafana starts at boot:
+
+cloud_user@fas4c:/tmp$ sudo systemctl daemon-reload
+cloud_user@fas4c:/tmp$ sudo systemctl enable grafana-server
+Synchronizing state of grafana-server.service with SysV service script with /lib/systemd/systemd-sysv-install.
+Executing: /lib/systemd/systemd-sysv-install enable grafana-server
+Created symlink /etc/systemd/system/multi-user.target.wants/grafana-server.service → /usr/lib/systemd/system/grafana-server.service.
+cloud_user@fas4c:/tmp$ sudo systemctl start grafana-server
+# Шаг 4. Access Grafana's web UI by going to IPADDRESS:3000.
+# Шаг 5. Log in with the username admin and the password admin. Reset the password when prompted.
+
+Add a Data Source
+	Click Add data source on the homepage.
+	Select Prometheus.
+	Set the URL to http://localhost:9090.
+	Click Save & Test.
+
+Add a Dashboard
+	From the left menu, return Home.
+	Click New dashboard. The dashboard is automatically created.
+	Click on the gear icon to the upper right.
+	Set the Name of the dashboard to Forethought.
+	Save the changes.
+	
+	
+	
+						#####Monitoring Basics#####
+###############
+#Service Discovery#
+###############
+
+По умолчанию во вкладке Status -> Service Discovery будет только Prometheus
+
+# Шаг 1. Добавить сервисов в /etc/prometheus/prometheus.yml
+Для того, чтобы добавить сервис вручную нужно, записать его в scrape_congigs в качестве job
+cloud_user@fas4c:~$ sudo vim /etc/prometheus/prometheus.yml
+# my global config
+global:
+  scrape_interval:     15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+       - localhost:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: 'prometheus'
+
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+    - targets: ['localhost:9090']
+
+Измененный файл:
+# my global config
+global:
+  scrape_interval:     15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+       - localhost:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: 'prometheus'
+
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+    - targets: ['localhost:9090']
+
+  - job_name: 'grafana' # Новый job
+    static_configs:
+    - targets: ['localhost:3000']
+
+  - job_name: 'alertmanager' # Новый job
+    static_configs:
+    - targets: ['localhost:9093']
+
+# Шаг 2. Перезагрузить службу Prometheus
+cloud_user@fas4c:~$ sudo systemctl restart prometheus
+cloud_user@fas4c:~$ sudo systemctl status prometheus
+● prometheus.service - Prometheus
+   Loaded: loaded (/etc/systemd/system/prometheus.service; enabled; vendor preset: enabled)
+   Active: active (running) since Thu 2020-03-05 07:30:46 UTC; 31s ago
+ Main PID: 5090 (prometheus)
+    Tasks: 10 (limit: 2318)
+   CGroup: /system.slice/prometheus.service
+           └─5090 /usr/local/bin/prometheus --config.file /etc/prometheus/prometheus.yml --storage.tsdb.path /var/lib/prometheus/ --web.console.templates=/etc/prometheus/consoles --web.console.libraries=/et
+
+# Шаг 3. Во вкладке Status -> Service Discovery будет еще два сервиса: grafana и alertmanager
+
+# Для автоматизации Service Discovery можно использовать:
+	Consul
+	Zookeeper
+	Nerve
+	Any service discovery tool native to your existing platform:
+		AWS
+		Azure
+		GCP
+		Kubernetes
+		Marathon
+		... and more!										

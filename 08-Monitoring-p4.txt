@@ -1,0 +1,373 @@
+											#####Managing Alerts#####
+Plan for Managing Alerts:
+	Recording Rules
+	Alerting Rules
+	For
+	Annotations
+	Labels
+	Preparing Our Receiver
+	Using Alertmanager
+	Silences
+###############
+#Recording Rules#
+###############
+
+# Шаг 1. Locate the rule_files parameter. Add a rule file at rules.yml:
+cloud_user@fas4c:~$ sudo vim /etc/prometheus/prometheus.yml
+Добавить:
+ rule_files:
+   - "rules.yml"
+
+# Шаг 2. Create the rules.yml file in /etc/prometheus:
+cloud_user@fas4c:~$ sudo vim /etc/prometheus/rules.yml   
+
+# Шаг 3. Every rule needs to be contained in a group. Define a group called uptime, which will track the uptime of anything that affects the end user:
+ groups:
+   - name: uptime
+   
+# Шаг 4. We're first going to define a recording rule, which will keep track of the results of a PromQL expression, without performing any kind of alerting:
+# Сейчас создаем recording rule!
+groups:
+  - name: uptime
+    rules:
+      - record: job:uptime:average:ft
+        expr: avg without (instance) (up{job="forethought"})
+		
+Notice that format of record — this is the setup we need to use to define the name of our recording rule. Once defined, we can call this metric directly in PromQL.
+The expr is just the expression, as we would normally write it in the expression editor.
+Save and exit the file.
+
+# Шаг 5. Restart Prometheus:
+cloud_user@fas4c:~$ sudo systemctl restart prometheus
+
+###############
+#Alerting Rules#
+###############
+
+# Шаг 1. Now that we have a recording rule, we can build our alerting rule based on this. We know we want to alert when we have less than 75% of our application containers up, so we'll use the job:uptime:average:ft < .75 expression:
+cloud_user@fas4c:~$ sudo vim /etc/prometheus/rules.yml
+ groups:
+   - name: uptime
+     rules:
+       - record: job:uptime:average:ft
+         expr: avg without (instance) (up{job="forethought"})
+       - alert: ForethoughtApplicationDown # Добавляем
+         expr: job:uptime:average:ft < .75
+		 
+# Шаг 2. Restart Prometheus:
+cloud_user@fas4c:~$ sudo systemctl restart prometheus
+
+###############
+#For#
+###############
+
+# Шаг 1. Add "for" condition:
+cloud_user@fas4c:~$ sudo vim /etc/prometheus/rules.yml
+groups:
+  - name: uptime
+    rules:
+      - record: job:uptime:average:ft
+        expr: avg without (instance) (up{job="forethought"})
+      - alert: ForethoughtApplicationDown
+        expr: job:uptime:average:ft < .75
+        for: 5m # Добавляем
+
+# Шаг 2. Restart Prometheus:
+cloud_user@fas4c:~$ sudo systemctl restart prometheus
+		
+When we set for to 5m, we're telling Prometheus to hold the alert in a pending state until it's been down for five minutes. Then — and only then — will it fire the alert to Alertmanager. This prevents any unnecessary alerting from issues like the above. As your monitoring system matures, you'll often find yourself adjusting this number based on frequency and severity of alerts. Don't be surprised if you end up with for times up to an hour or more!
+
+После того как мы остановим контейнер с приложением ft-app, на странице Alerts в Prometheus наш alert будет в состоянии Pending в течение 5 минут
+
+###############
+#Annotations#
+###############
+# Шаг 1. Add annotation:
+groups:
+  - name: uptime
+    rules:
+      - record: job:uptime:average:ft
+        expr: avg without (instance) (up{job="forethought"})
+      - alert: ForethoughtApplicationDown
+        expr: job:uptime:average:ft < .75
+        for: 5m
+        annotations: # Добавляем
+          overview: '{{printf "%.2f" $value}}% instances are up for {{ $labels.job }}'
+		  
+# Шаг 2. Restart Prometheus:
+cloud_user@fas4c:~$ sudo systemctl restart prometheus
+
+# printf "%.2f" - getting 3.14159 - to print as 3.14
+
+# Annotation можно увидеть на странице Alerts в Prometheus
+
+###############
+#Labels#
+###############
+# Шаг 1. Add Labels:
+groups:
+  - name: uptime
+    rules:
+      - record: job:uptime:average:ft
+        expr: avg without (instance) (up{job="forethought"})
+      - alert: ForethoughtApplicationDown
+        expr: job:uptime:average:ft < .75
+        for: 5m
+        labels: # Добавляем
+          severity: page
+          team: devops
+        annotations:
+          overview: '{{printf "%.2f" $value}}% instances are up for {{ $labels.job }}'
+		  
+# Шаг 2. Restart Prometheus:
+cloud_user@fas4c:~$ sudo systemctl restart prometheus
+
+# Labels можно увидеть на странице Alerts в Prometheus
+# При использовании labels alertname и job появляются автоматически
+
+###############
+#Preparing Our Receiver#
+###############
+# Создание канала в Slack, для получения alert`ов
+
+# Шаг 1. Go to slack.com and create a new workspace, following the step-by-step instructions on screen until you are given your workspace. Be sure to add a prometheus channel!
+# Шаг 2. From your chat, use the workspace menu to go to Administration and then Manage apps.
+# Шаг 3. Select Build on the top menu.
+# Шаг 4. Press Start Building, then Create New App. Give your application a name, and then select the workspace you just created. Click Create App when done.
+# Шаг 5. Select Incoming Webhooks from the menu.
+# Шаг 6. Turn webhooks on.
+# Шаг 7. Click Add New Webhook to Workspace, setting the channel name to the prometheus channel. Authorize the webhook.
+# Шаг 8. Make note of the webhook URL.
+
+###############
+#Using Alertmanager#
+###############
+
+Our Alertmanager configuration is divided into four sections: 
+	global, which stores any configuration that will remain consistent across the entire file, such as our email; 
+	route, which defines how we want to sort our files to our receivers; 
+	receivers, which define the endpoints where we want to receive our alerts; 
+	inhibit_rules, which let us define rules to suppress related alerts so we don't spam messages.
+	
+# Шаг 1. Open the Alertmanager configuration:
+cloud_user@fas4c:~$ sudo vim /etc/alertmanager/alertmanager.yml
+
+# Шаг 2. Set the default route's repeat_interval to one minute and update the receiver to use our Slack endpoint:
+ route:
+   receiver: 'slack'
+   group_by: ['alertname']
+   group_wait: 10s
+   group_interval: 10s
+   repeat_interval: 1m
+   
+# Шаг 3. Create a secondary route that will send severe: page alerts to the Slack receiver; group by the team label:
+ route:
+   receiver: 'slack'
+   group_by: ['alertname']
+   group_wait: 10s
+   group_interval: 10s
+   repeat_interval: 1m
+   routes:
+     - match:
+         severity: page
+       group_by: ['team']
+       receiver: 'slack'
+	   
+# Шаг 4. Add a tertiary route that sends all alerts for the devops team to Slack:
+ route:
+   receiver: 'slack'
+   group_by: ['alertname']
+   repeat_interval: 1m
+   routes:
+     - match:
+         severity: page
+       group_by: ['team']
+       receiver: 'slack'
+       routes:
+         - match:
+             team: devops
+           receiver: 'slack'
+		   
+# Шаг 5. Update the receiver to use Slack:
+ receivers:
+ - name: 'slack'
+   slack_configs:
+     - channel: "#prometheus"
+       api_url: APIKEY
+       text: "Overview: {{ .CommonAnnotations.overview }}"
+	   
+# Шаг 6. Update the inhibit_rules so that any alerts with the severity of ticket for the DevOps team are suppressed when a page-level alert is happening:
+ inhibit_rules:
+   - source_match:
+       severity: 'page'
+     target_match:
+       severity: 'ticket'
+     equal: ['team']
+	 
+# Шаг 7. Restart Alertmanager:
+cloud_user@fas4c:~$ sudo systemctl restart alertmanager
+ 
+# Шаг 8. View your Slack chat and wait to see the firing alert.
+
+Получившийся файл /etc/alertmanager/alertmanager.yml
+cloud_user@fas4c:~$ sudo vim /etc/alertmanager/alertmanager.yml
+global:
+  resolve_timeout: 5m # Сколько ждать решения alert`a
+
+route:
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1m
+  receiver: 'slack' # Объявление получателя alert`ов
+  routes:
+    - match:
+        severity: page
+      group_by: ['team']
+      receiver: 'slack'
+      routes:
+        - match:
+            team: devops
+          receiver: 'slack'
+
+receivers:
+- name: 'slack'
+  slack_configs:
+    - channel: "#prometheus"
+      api_url: APIKEY
+      text: "Overview: {{ .CommonAnnotations.overview }}" #Берем из существующего annotation в rules.yml
+
+inhibit_rules:
+  - source_match:
+      severity: 'page'
+    target_match:
+      severity: 'ticket'
+    equal: ['team']
+
+###############
+#Silences#
+###############
+Once we have our alert firing, we need to know how to pause the alert for the time it takes us to fix the issue. We can do this from the Alertmanager web UI at port 9093. From there, we have the option to either select Silence next to the alert itself, or click Silences at the top of the screen and select New Silence.
+
+Once we have the silence window open, we're presented with a number of options.
+
+First, we want to set the length of the silence. For an exising alert, set it to the amount of time you think it will take you to troubleshoot the issue. If you're setting an alert for expected downtime, give yourself enough time to complete any downtime tasks and solve unexpected issues.
+
+Finally, we need to make note of who is making the silence and a comment regarding the silence. For this, go ahead and note that the Docker container is down and you're silencing until you restart.
+
+# Запустить контейнер с приложением, чтобы посмотреть, когда появится resolve
+cloud_user@fas4c:~$ docker start ft-app
+
+###############
+#Получившиеся файлы конфигурации#
+###############
+
+###Prometheus###
+cloud_user@fas4c:~$ sudo vim /etc/prometheus/prometheus.yml
+# my global config
+global:
+  scrape_interval:     15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+       - localhost:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+   - "rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: 'prometheus'
+
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+    - targets: ['localhost:9090']
+
+  - job_name: 'grafana'
+    static_configs:
+    - targets: ['localhost:3000']
+
+  - job_name: 'alertmanager'
+    static_configs:
+    - targets: ['localhost:9093']
+
+  - job_name: 'node_exporter_self'
+    static_configs:
+    - targets: ['localhost:9100']
+
+  - job_name: 'node_exporter_worker1'
+    static_configs:
+    - targets: ['172.31.21.148:9100']
+
+  - job_name: 'cadvisor_self'
+    static_configs:
+    - targets: ['localhost:8000']
+
+  - job_name: 'cadvisor_worker1'
+    static_configs:
+    - targets: ['172.31.21.148:8000']
+
+  - job_name: 'forethought'
+    static_configs:
+    - targets: ['172.31.21.148:80']
+
+###Rules###
+cloud_user@fas4c:~$ sudo vim /etc/prometheus/rules.yml
+groups:
+  - name: uptime
+    rules:
+      - record: job:uptime:average:ft # Формат записи
+        expr: avg without (instance) (up{job="forethought"}) # PromQL
+      - alert: ForethoughtApplicationDown # Правило оповещения
+        expr: job:uptime:average:ft < .75 # Если меньше, чем 75%
+        for: 5m # Наблюдать за событием 5 минут,только потом отправлять в AlertManager
+        labels: # Для сортировки отправки alert`ов
+          severity: page # Важность
+          team: devops # Группа, в которую отправлять alert
+        annotations:
+          overview: '{{printf "%.2f" $value}}% instances are up for {{ $labels.job }}' # Текст сообщения для alert`a
+
+###AlertManager###
+cloud_user@fas4c:~$ sudo vim /etc/alertmanager/alertmanager.yml
+global:
+  resolve_timeout: 5m # Сколько ждать решения alert`a
+
+route:
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1m
+  receiver: 'slack' # Объявление получателя alert`ов
+  routes:
+    - match:
+        severity: page
+      group_by: ['team']
+      receiver: 'slack'
+      routes:
+        - match:
+            team: devops
+          receiver: 'slack'
+
+receivers:
+- name: 'slack'
+  slack_configs:
+    - channel: "#prometheus"
+      api_url: APIKEY
+      text: "Overview: {{ .CommonAnnotations.overview }}" #Берем из существующего annotation в rules.yml
+
+inhibit_rules:
+  - source_match:
+      severity: 'page'
+    target_match:
+      severity: 'ticket'
+    equal: ['team']

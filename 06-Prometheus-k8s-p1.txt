@@ -1,0 +1,189 @@
+						Introduction
+###############
+#About This Course#
+###############
+Plan:
+	Prometheus Architecture
+	Run Prometheus on Kubernetes
+	Application Monitoring
+	PromQL
+	Alerting
+	
+###############
+#What is Prometheus?#
+###############
+Documentation is in the OneNote
+
+						Setting Up Your Environment
+###############
+#Setting Up a Kubernetes Cluster#
+###############
+
+#K8s:
+#cloud_user@fas1c - K8s Master
+#cloud_user@fas2c - K8s Worker
+
+# 
+# Setting up the Kubernetes Master
+#
+
+# Step 1. Disable swap
+[cloud_user@fas1c ~]$ sudo -i
+[root@fas1c ~]# swapoff -a
+
+# Step 2. Edit /etc/fstab
+[root@fas1c ~]# vi /etc/fstab	
+	# Step 3. Comment out swap
+	#/root/swap swap swap sw 0 0
+	
+# Step 4. Add the Kubernetes repo
+Файл /etc/yum.repos.d/kubernetes.repo изначально отсутствует
+[root@fas1c ~]# cat << EOF > /etc/yum.repos.d/kubernetes.repo
+> [kubernetes]
+> name=Kubernetes
+> baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+> enabled=1
+> gpgcheck=1
+> repo_gpgcheck=1
+> gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+> exclude=kube*
+> EOF
+
+# Step 5. Disable SELinux
+[root@fas1c ~]# setenforce 0
+
+# Step 6. Permanently disable SELinux
+[root@fas1c ~]# vi /etc/selinux/config
+	# Step 7. Change enforcing to disabled
+	SELINUX=disabled
+
+# Step 8. Install Kubernetes 1.11.3
+[root@fas1c ~]# yum install -y kubelet-1.11.3 kubeadm-1.11.3 kubectl-1.11.3 kubernetes-cni-0.6.0 --disableexcludes=kubernetes
+Dependency Installed:
+  cri-tools.x86_64 0:1.13.0-0                                       ebtables.x86_64 0:2.0.10-16.el7                                       socat.x86_64 0:1.7.3.2-2.el7
+Complete!
+
+# Step 9. Start and enable the Kubernetes service
+[root@fas1c ~]# systemctl start kubelet && systemctl enable kubelet
+Created symlink from /etc/systemd/system/multi-user.target.wants/kubelet.service to /etc/systemd/system/kubelet.service.
+
+# Step 10. Create the k8s.conf file
+[root@fas1c ~]# cat << EOF >  /etc/sysctl.d/k8s.conf
+> net.bridge.bridge-nf-call-ip6tables = 1
+> net.bridge.bridge-nf-call-iptables = 1
+> EOF
+
+[root@fas1c ~]# sysctl --system
+
+# Step 11. Create kube-config.yml
+[root@fas1c ~]# vi kube-config.yml
+
+# Step 12. Add the following to kube-config.yml
+apiVersion: kubeadm.k8s.io/v1alpha1
+kind:
+kubernetesVersion: "v1.11.3"
+networking:
+  podSubnet: 10.244.0.0/16
+apiServerExtraArgs:
+  service-node-port-range: 8000-31274
+  
+# Step 13. Initialize Kubernetes
+[root@fas1c ~]# kubeadm init --config kube-config.yml
+
+Сохранить: kubeadm join 172.31.17.213:6443 --token z8vhd7.mlanwg9cb2co2oad --discovery-token-ca-cert-hash sha256:280eafdd2ab7adc8d35ab39164ee5f68615b641616d7f3e177d3b49463a160fa
+
+# Step 14. Copy admin.conf to your home directory
+Эти команды появятся при выводе на шаге 13
+
+[root@fas1c ~]# mkdir -p $HOME/.kube
+[root@fas1c ~]# sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+[root@fas1c ~]# sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+# Step 15. Install flannel
+[root@fas1c ~]# kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/v0.9.1/Documentation/kube-flannel.yml
+
+# Step 16. Patch flannel
+[root@fas1c ~]# vi /etc/kubernetes/manifests/kube-controller-manager.yaml
+
+	# Step 17. Add the following to kube-controller-manager.yaml
+	--allocate-node-cidrs=true
+	--cluster-cidr=10.244.0.0/16
+
+	У меня эти строки уже были
+	
+	# Step 18. Then reload kubelete
+	[root@fas1c ~]# systemctl restart kubelet
+	
+# 
+# Setting up the Kubernetes Worker
+#
+
+# Step 1-10. Disable swap
+Такие же как и на K8s Master
+
+# Step 11. Use the join token to add the Worker Node to the cluster
+[root@fas2c ~]# kubeadm join 172.31.17.213:6443 --token z8vhd7.mlanwg9cb2co2oad --discovery-token-ca-cert-hash sha256:280eafdd2ab7adc8d35ab39164ee5f68615b641616d7f3e177d3b49463a160fa
+This node has joined the cluster:
+* Certificate signing request was sent to master and a response
+  was received.
+* The Kubelet was informed of the new secure connection details.
+Run 'kubectl get nodes' on the master to see this node join the cluster.
+
+# Step 12. On the master node, test to see if the cluster was created properly
+
+# Step 13. Get a listing of the nodes and pods
+[root@fas1c ~]# kubectl get nodes
+NAME                           STATUS    ROLES     AGE       VERSION
+fas1c.mylabserver.com   Ready     master    19m       v1.11.3
+fas2c.mylabserver.com   Ready     <none>    1m        v1.11.3
+
+[root@fas1c ~]# kubectl get pods -n kube-system
+NAME                                                   READY     STATUS    RESTARTS   AGE
+coredns-78fcdf6894-ttlks                               1/1       Running   0          21m
+coredns-78fcdf6894-xhm8l                               1/1       Running   0          21m
+etcd-fas1c.mylabserver.com                      1/1       Running   0          20m
+kube-apiserver-fas1c.mylabserver.com            1/1       Running   0          21m
+kube-controller-manager-fas1c.mylabserver.com   1/1       Running   0          21m
+kube-flannel-ds-brtp8                                  1/1       Running   1          4m
+kube-flannel-ds-cd5lj                                  1/1       Running   0          18m
+kube-proxy-8tvjq                                       1/1       Running   0          21m
+kube-proxy-fsb49                                       1/1       Running   0          4m
+kube-scheduler-fas1c.mylabserver.com            1/1       Running   0          21m
+
+!!!ВСЕ КОМАНДЫ БУДУТ ДОСТУПНЫ ОТ ROOT, ОТ CLOUD_USER ТОЛЬКО ЧЕРЕЗ SUDO
+[cloud_user@fas1c ~]$ sudo kubectl get nodes
+NAME                           STATUS    ROLES     AGE       VERSION
+fas1c.mylabserver.com   Ready     master    15h       v1.11.3
+fas2c.mylabserver.com   Ready     <none>    15h       v1.11.3
+
+						Prometheus Architecture
+###############
+#Prometheus Architecture Diagram#
+###############
+Documentation is in the OneNote
+
+###############
+#Client Libraries#
+###############
+Documentation is in the OneNote
+
+You use client libraries and instrumentation to gather metrics for Prometheus to scrape.
+Prometheus scrapes your application's HTTP endpoint. Client libraries send the current state of all metrics tracked to the Prometheus server.
+You can develop your own client library if one doesn't exist.
+This is the code used to instrument the app using the NodeJS library prom-client:
+
+###############
+#Exporters#
+###############
+Documentation is in the OneNote
+
+###############
+#Service Discovery#
+###############
+Documentation is in the OneNote
+
+###############
+#Scraping#
+###############
+Documentation is in the OneNote
+

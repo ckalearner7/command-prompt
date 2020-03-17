@@ -1,0 +1,490 @@
+											#####Docker Security#####
+###############
+#Introduction to Docker Security#
+###############
+Docker Security 101
+Security is all about layers
+	Linux security:
+		Namespaces
+		Control Groups
+		Mandatory Access Control (MAC)
+		Seccomp
+
+	Docker security:
+		Docker Swarm
+		Docker Content Trust
+		Docker Security Scanner
+		Docker secrets
+
+Namespaces
+Docker creates a set of namespaces and control groups for the container. Docker containers are an organized collections of namespaces.
+	Namespaces provide isolation.
+	Each container also gets its own network stack.
+Docker on Linux namespaces:
+	Process ID (pid)
+	network (net)
+	Filesystem/mount (mount)
+	Inter-process Communication (ipc)
+	User (user)
+	UTS (uts)
+
+Control Groups
+Control Groups are about setting limits for:
+	CPU
+	RAM
+	Disk I/O	
+They help to mitigate denial-of-service attacks, and are important on multi-tenant platforms.
+
+Capabilities
+Capabilities turn the binary “root/non-root” dichotomy into a fine-grained access control system. In most cases, containers do not need “real” root privileges at all. This means root within a container has much less privileges than the real root. It also means that even if an intruder manages to escalate to root within a container, it is much harder to do serious damage, or to escalate to the host.
+
+Mandatory Access Control systems
+Two major MAC technologies are:
+	SELinux
+	AppArmor
+	
+Seccomp
+This limits the syscalls a container can make to the host's kernel. All new containers get a default seccomp configured
+
+Docker Swarm
+	Swarm Mode:
+		Cryptographic node Ids
+		Mutual authentication via TLS
+		Secure join tokens
+		CA configuration with automatic certificate rotation
+		Encrypted cluster store
+		Encrypted networks
+	docker swarm update --cert-expiry [INT]h
+
+Docker Secrets
+These store sensitive data like:
+	Passwords
+	TLS Certificates
+	API Keys
+
+Secrets Workflow:
+	A secret is created and posted to the Swarm.
+	The secret is encrypted and stored.
+	A service is created and the secret is attached.
+	Secrets are stored in-flight.
+	The secret is mounted into the container of a service.
+	When the task is complete, the in-memory is torn down.
+	
+###############
+#Working with Docker Security#
+###############
+#Seccomp Profile
+# Сценарий 1. Показать, что не все команды доступны для root внутри контейнера
+[cloud_user@fas3c ~]$ docker container run --rm -it alpine sh # Запускаем контейнер - выполняем shell - удаляем после выхода
+Unable to find image 'alpine:latest' locally
+latest: Pulling from library/alpine
+c9b1b535fdd9: Pull complete
+Digest: sha256:ab00606a42621fb68f2ed6ad3c88be54397f981a7b70a79db3d1172b11c4367d
+Status: Downloaded newer image for alpine:latest
+/ # whoami
+root # мы root в контейнере
+/ # mount /dev/sda1 /tmp
+mount: permission denied (are you root?) # но нам не хватает прав
+/ # swapoff -a
+swapoff: /root/swap: Operation not permitted
+
+# Сценарий 2. Показать, как работать с своим Seccomp profile
+[cloud_user@fas3c ~]$ mkdir -p seccomp/profiles/chmod
+[cloud_user@fas3c ~]$ cd seccomp/profiles/chmod
+[cloud_user@fas3c chmod]$ wget https://raw.githubusercontent.com/moby/moby/master/profiles/seccomp/default.json # Качаем отдельный seccomp file и правим его
+[cloud_user@fas3c chmod]$ vi default.json # Удаляем команды chmod/fchmod/fchmodat (строки 65, 97, 98)
+[cloud_user@fas3c chmod]$ docker container run --rm -it --security-opt seccomp=./default.json alpine sh # Заново запускаем контейнер
+/ # whoami
+root
+/ # chmod +r /usr
+chmod: /usr: Operation not permitted # Теперь команду нельзя выполнить даже root
+
+#Capabilities
+# https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities
+[cloud_user@fas3c chmod]$ docker container run --rm -it alpine sh
+/ # mknod /dev/random2 c 1 8 # Команда mknod успешно выполнилась
+/ # exit
+[cloud_user@fas3c chmod]$ docker container run --rm -it --cap-drop=MKNOD alpine sh # Заблокируем команду на уровне запуска контейнера 
+/ # mknod /dev/random2 c 1 8
+mknod: /dev/random2: Operation not permitted # Коману нельзя выполнить
+
+#Control Groups
+# https://docs.docker.com/engine/reference/run/#runtime-constraints-on-resources
+# https://docs.docker.com/config/containers/resource_constraints/
+[cloud_user@fas3c chmod]$ docker container run -d --name resource-limits --cpus=".5" --memory=512M --memory-swap=1G rivethead42/weather-app # Ограничение ресурсов для контейнера
+[cloud_user@fas3c chmod]$ docker ps
+CONTAINER ID        IMAGE                     COMMAND             CREATED             STATUS              PORTS               NAMES
+b4e08e3069e0        rivethead42/weather-app   "./bin/www"         18 seconds ago      Up 17 seconds       3000/tcp            resource-limits
+[cloud_user@fas3c chmod]$ docker container inspect b4e08e3069e0 | grep Memory
+            "Memory": 536870912,
+            "KernelMemory": 0,
+            "KernelMemoryTCP": 0,
+            "MemoryReservation": 0,
+            "MemorySwap": 1073741824,
+            "MemorySwappiness": null,
+
+#Running Docker Bench for Security
+# https://github.com/docker/docker-bench-security # Описание тут
+[cloud_user@fas3c chmod]$ docker container run --rm -it --network host --pid host --userns host --cap-add audit_control \
+>     -e DOCKER_CONTENT_TRUST=$DOCKER_CONTENT_TRUST \
+>     -v /var/lib:/var/lib \
+>     -v /var/run/docker.sock:/var/run/docker.sock \
+>     -v /usr/lib/systemd:/usr/lib/systemd \
+>     -v /etc:/etc --label docker_bench_security \
+>     docker/docker-bench-security
+[INFO] Checks: 105
+[INFO] Score: 7
+
+#Docker Bench for Security - это сценарий, который проверяет десятки распространенных передовых методов развертывания контейнеров Docker в производстве. Все тесты автоматизированы, #и вдохновлены CIS Docker Benchmark v1.2.0.
+#Мы делаем его доступным в качестве утилиты с открытым исходным кодом, чтобы сообщество Docker могло иметь простой способ самопроверки своих хостов и контейнеров докеров на предмет #соответствия этому эталону.
+
+###############
+#Docker Content Trust#
+###############
+[cloud_user@fas3c ~]$ docker images | grep rivet
+rivethead42/weather-app        latest              13181fdf5ebc        12 months ago       91.9MB
+[cloud_user@fas3c ~]$ docker image tag rivethead42/weather-app:latest rivethead42/dct:latest # Протегировать docker image tag SOURCE_IMAGE[:TAG] TARGET_IMAGE[:TAG]
+[cloud_user@fas3c ~]$ docker images | grep rivet
+rivethead42/dct                latest              13181fdf5ebc        12 months ago       91.9MB # Тот же image id с новым tag
+rivethead42/weather-app        latest              13181fdf5ebc        12 months ago       91.9MB # Тот же image id со старым tag
+
+[cloud_user@fas3c ~]$ docker trust key generate afrl # Создаем ключ, заводим пароль
+Generating key for afrl...
+Enter passphrase for new afrl key with ID a114a30:
+Repeat passphrase for new afrl key with ID a114a30:
+Successfully generated and loaded private key. Corresponding public key available: /home/cloud_user/afrl.pub # Получаем ключ afrl.pub
+
+[cloud_user@fas3c ~]$ docker trust signer add --key afrl.pub fas rivethead42/dct # Создаем подписчика для image - используем созданный ключ и аккаунт на Docker Hub
+
+[cloud_user@fas3c ~]$ docker trust sign rivethead42/dct:latest # Подписать образ и отправить на Docke Hub
+
+В качестве альтернативы, после импорта ключей изображение можно нажать с помощью команды $ docker push, экспортировав переменную среды DCT.
+[cloud_user@fas3c ~]$ export DOCKER_CONTENT_TRUST=1 # Экспортируем переменную окружения, чтобы ее могли использовать другие процессы
+[cloud_user@fas3c ~]$ docker image push rivethead42/dct:latest # Отправить подписанный образ на Docker Hub
+
+Так как DOCKER_CONTENT_TRUST=1 мы можем скачивать только подписанные образы:
+[cloud_user@fas3c ~]$ docker image rm rivethead42/weather-app:latest # Удалить локальный image
+[cloud_user@fas3c ~]$ docker image pull rivethead42/weather-app # Скачать неподписанный image не дает?
+
+[cloud_user@fas3c ~]$ docker image rm nginx:latest # Удалить локальный image
+[cloud_user@fas3c ~]$ docker image pull nginx:latest # Можно скачать
+
+[cloud_user@fas3c ~]$ vi /etc/docker/daemon.json # Чтобы прописать на постоянной основе DOCKER_CONTENT_TRUST (тогда перезагрузка службы docker ее не обнулит)
+{
+    "content-trust": {
+        "mode": "enforced"
+    }
+}
+
+Общие команды:
+Creating a Key:
+docker trust key generate [NAME]
+
+Importing a Key:
+docker trust key load [PEM] --name [NAME]
+
+Add a signer:
+docker trust signer add --key [PEM] [NAME] [REPOSITORY]
+
+Remove a signer:
+docker trust signer remove [NAME] [REPOSITORY]
+
+Signing an image:
+docker trust sign [IMAGE]:[TAG]
+
+###############
+#Working with Secrets#
+###############
+We will start working with Docker Secrets to protect sensitive data, such as passwords and API Keys.
+Docker secrets commands:
+	create: Create a secret from a file or STDIN as content
+	inspect: Display detailed information on one or more secrets
+	ls: List secrets
+	rm: Remove one or more secrets
+
+# Сценарий 1. Общий	
+# Шаг 1. Подготовка окружения
+[cloud_user@fas3c ~]$ mkdir secrets
+[cloud_user@fas3c ~]$ cd secrets/
+
+# Шаг 2. Создать secret, используя STDIN
+# openssl rand -base64 20 # Означает создать случайный пароль из 20 символов
+[cloud_user@fas3c secrets]$ openssl rand -base64 20 | docker secret create my_secret_data -
+mz09rlcsj3uys85zpx52h90kf
+
+[cloud_user@fas3c secrets]$ docker secret ls # Проверка
+ID                          NAME                DRIVER              CREATED              UPDATED
+mz09rlcsj3uys85zpx52h90kf   my_secret_data                          About a minute ago   About a minute ago
+
+# Шаг 3. Создать secret, используя файл
+[cloud_user@fas3c secrets]$ openssl rand -base64 20 > secret.txt
+[cloud_user@fas3c secrets]$ docker secret create my_secret_data2 secret.txt
+l5posr14f87j6text9lhn6o0t
+[cloud_user@fas3c secrets]$ docker secret ls
+ID                          NAME                DRIVER              CREATED             UPDATED
+mz09rlcsj3uys85zpx52h90kf   my_secret_data                          3 minutes ago       3 minutes ago
+l5posr14f87j6text9lhn6o0t   my_secret_data2                         4 seconds ago       4 seconds ago
+
+# Шаг 4. Создать service в Docke Swarm, используя secret из шага 2
+[cloud_user@fas3c secrets]$ docker service create --name redis --secret my_secret_data redis:alpine
+[cloud_user@fas3c secrets]$ docker service ls
+ID                  NAME                MODE                REPLICAS            IMAGE               PORTS
+makr5wsdatnb        redis               replicated          1/1                 redis:alpine
+[cloud_user@fas3c secrets]$ docker service ps redis
+ID                  NAME                IMAGE               NODE                           DESIRED STATE       CURRENT STATE           ERROR               PORTS
+wq1psbmptcrd        redis.1             redis:alpine        fas1c.mylabserver.com   Running             Running 2 minutes ago
+
+# Шаг 5. Вывод информации о secret
+[cloud_user@fas3c secrets]$ docker secret inspect my_secret_data
+[
+    {
+        "ID": "mz09rlcsj3uys85zpx52h90kf",
+        "Version": {
+            "Index": 2930
+        },
+        "CreatedAt": "2020-02-17T06:29:13.93039537Z",
+        "UpdatedAt": "2020-02-17T06:29:13.93039537Z",
+        "Spec": {
+            "Name": "my_secret_data",
+            "Labels": {}
+        }
+    }
+]
+
+# Шаг 6. Удалить лишний secret из шага 3
+[cloud_user@fas3c secrets]$ docker secret rm my_secret_data2
+my_secret_data2
+
+# Сценарий 2. Зашифровать пароль для MySQL с помощью secret
+# Шаг 1. Создать secret с паролями, используя файл
+[cloud_user@fas3c secrets]$ openssl rand -base64 20 > db_password.txt
+[cloud_user@fas3c secrets]$ openssl rand -base64 20 > db_root_password.txt
+
+# Шаг 2. Подготовка compose-файла для использования stack (stack позволяет поднять несколько разных service в Swarm)
+Для начала проанализируем sh-script, который используется при создании образа MySQL
+https://github.com/docker-library/mysql/blob/master/5.7/docker-entrypoint.sh
+...
+file_env() { # Здесь формируются переменные окружения
+	local var="$1"
+	local fileVar="${var}_FILE" # Именно поэтому дальше в compose-файле меняется переменная с MYSQL_ROOT_PASSWORD на MYSQL_ROOT_PASSWORD_FILE
+	local def="${2:-}"
+	if [ "${!var:-}" ] && [ "${!fileVar:-}" ]; then
+		mysql_error "Both $var and $fileVar are set (but are exclusive)"
+	fi
+	local val="$def"
+	if [ "${!var:-}" ]; then
+		val="${!var}"
+	elif [ "${!fileVar:-}" ]; then
+		val="$(< "${!fileVar}")"
+	fi
+	export "$var"="$val"
+	unset "$fileVar"
+}
+
+...
+# Initialize values that might be stored in a file
+	file_env 'MYSQL_ROOT_HOST' '%'
+	file_env 'MYSQL_DATABASE'
+	file_env 'MYSQL_USER'
+	file_env 'MYSQL_PASSWORD'
+	file_env 'MYSQL_ROOT_PASSWORD'
+	
+file_env используется для объявления переменных MYSQL_PASSWORD и MYSQL_ROOT_PASSWORD
+
+[cloud_user@fas3c secrets]$ vi docker-compose.yml
+version: '3.1'
+
+services:
+   db:
+     image: mysql:5.7
+     volumes:
+       - db_data:/var/lib/mysql
+     networks:
+       mysql_internal:
+         aliases: ["db"]
+     environment:
+       MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_root_password # Ссылка на secret 1 | ВАЖНО, что раньше переменная была MYSQL_ROOT_PASSWORD, теперь MYSQL_ROOT_PASSWORD_FILE
+       MYSQL_DATABASE: wordpress
+       MYSQL_USER: wordpress
+       MYSQL_PASSWORD_FILE: /run/secrets/db_password # Ссылка на secret 2
+     secrets:
+       - db_root_password # Объявление secret 1
+       - db_password # Объявление secret 2
+
+   wordpress:
+     depends_on:
+       - db
+     image: wordpress:latest
+     networks:
+       mysql_internal:
+         aliases: ["wordpress"]
+       wordpress_public:
+     ports:
+       - "8001:80"
+     environment:
+       WORDPRESS_DB_HOST: db:3306
+       WORDPRESS_DB_USER: wordpress
+       WORDPRESS_DB_PASSWORD_FILE: /run/secrets/db_password # Обратить внимание, что здесь тоже меняется название переменной окружения
+     secrets:
+       - db_password
+
+secrets:
+   db_password: # Создание secret 1
+     file: db_password.txt
+   db_root_password: # Создание secret 2
+     file: db_root_password.txt
+
+volumes:
+    db_data:
+networks:
+  mysql_internal:
+    driver: "overlay"
+    internal: true
+  wordpress_public:
+    driver: "overlay"
+	
+# Шаг 3. Создание service c помощью stack	
+[cloud_user@fas3c secrets]$ docker stack deploy --compose-file docker-compose.yml wp
+Creating network wp_mysql_internal
+Creating network wp_wordpress_public
+Creating secret wp_db_root_password
+Creating secret wp_db_password
+Creating service wp_db
+Creating service wp_wordpress
+
+# Шаг 4. Проверка
+[cloud_user@fas3c secrets]$ docker stack ls
+NAME                SERVICES            ORCHESTRATOR
+wp                  2                   Swarm
+
+[cloud_user@fas3c secrets]$ docker service ls
+ID                  NAME                MODE                REPLICAS            IMAGE               PORTS
+09m3r2qoetwj        wp_db               replicated          1/1                 mysql:5.7
+xh6bh5ijg7qg        wp_wordpress        replicated          1/1                 wordpress:latest    *:8001->80/tcp
+
+[cloud_user@fas3c secrets]$ docker secret ls
+ID                          NAME                  DRIVER              CREATED             UPDATED
+mz09rlcsj3uys85zpx52h90kf   my_secret_data                            24 hours ago        24 hours ago
+ncq59lz6il3aolh07jtow9sux   wp_db_password                            2 minutes ago       2 minutes ago
+s8h1zoyama47d3wwtq610yse4   wp_db_root_password                       2 minutes ago       2 minutes ago
+
+[cloud_user@fas3c secrets]$ docker ps # Один сервис создался на manager-node
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+a8195e6926b0        wordpress:latest    "docker-entrypoint.s…"   3 minutes ago       Up 3 minutes        80/tcp              wp_wordpress.1.erqnj6f5umm6iq14to73q0xjm
+
+[cloud_user@fas2c ~]$ docker ps # Второй сервис создался на worker-node
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+96973ba7633c        mysql:5.7           "docker-entrypoint.s…"   5 minutes ago       Up 5 minutes                            wp_db.1.pa2t4k11ia2k4pxqmnhiizh18
+
+Wordpress доступен по public IP-address manager-node http://54.210.134.197:8001/
+
+###############
+#Lab 1. Using Docker Secrets to Manage Sensitive Data#
+###############
+#Задача:
+Чтобы обезопасить базу данных MySQL, мы решили переместить контейнер, в котором она находится, как службу Swarm, используя секреты.
+Мы будем использовать OpenSSL для генерации безопасных паролей как для пользователей MySQL: root и user. Затем мы сохраним их в отдельные файлы. Затем мы создадим секреты для этих паролей, и, наконец, создадим службу MySQL, используя эти секреты.
+
+#Последовательность действий:
+Complete the Swarm Setup
+	On the manager node, the swarm has already been initialized. Get the worker token and have the worker node join the swarm.
+
+Randomly generate the MySQL passwords
+	Use openssl rand -base64 20 to randomly generate a password for mysql_root_password and save it to mysql_root_password.txt.
+	Use openssl rand -base64 20 to randomly generate a password for mysql_password and save it to mysql_password.txt.
+
+Create the MySQL Service
+	Create an overlay network called mysql_private and use the overlay driver.
+
+Create a service called mysql_secrets.
+	The service should have 1 replica.
+	Make sure it is attached to mysql_private. Mount a volume to /var/lib/mysql.
+	Make sure the service uses the following: secret mysql_root_password and mysql_password.
+	Create the following environment variables:
+		MYSQL_ROOT_PASSWORD_FILE: Set it to the in memory path to the mysql_root_password secret.
+		MYSQL_PASSWORD_FILE: Set it to the in memory path to the mysql_password secret.
+		MYSQL_USER: Set it to myUser.
+		MYSQL_DATABASE: Set it to myDB.
+Use the mysql:5.7 image.
+
+#Решение:
+# Шаг 1. Подключение worker-node в Swarm
+[cloud_user@ip-10-0-1-181 ~]$ docker node ls
+ID                            HOSTNAME                     STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+3pcyjq4hv17lq2y6a8hy33bno *   ip-10-0-1-181.ec2.internal   Ready               Active              Leader              19.03.2	# В swarm только один manager
+
+[cloud_user@ip-10-0-1-181 ~]$ docker swarm join-token worker # Вычисление ключа для manager-node
+To add a worker to this swarm, run the following command:
+    docker swarm join --token SWMTKN-1-0xcdjgx5e0bkc96w8vgdud5fxq6h1klcja4xsf8eqx47ejo6tu-c9hrc2k5c25ky68al0r4p1znp 10.0.1.181:2377
+
+[cloud_user@ip-10-0-1-245 ~]$ docker swarm join --token SWMTKN-1-0xcdjgx5e0bkc96w8vgdud5fxq6h1klcja4xsf8eqx47ejo6tu-c9hrc2k5c25ky68al0r4p1znp 10.0.1.181:2377 # Подключение worker-node
+This node joined a swarm as a worker.
+
+[cloud_user@ip-10-0-1-181 ~]$ docker node ls # Проверка
+ID                            HOSTNAME                     STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+3pcyjq4hv17lq2y6a8hy33bno *   ip-10-0-1-181.ec2.internal   Ready               Active              Leader              19.03.2
+mtvlnogwbvaqfly0it218ql1s     ip-10-0-1-245.ec2.internal   Ready               Active                                  19.03.2 # Worker-node добавилась
+
+# Шаг 2. Create Secrets
+[cloud_user@ip-10-0-1-181 ~]$ openssl rand -base64 20 > mysql_root_password.txt # Создание пароля и запись в файл
+[cloud_user@ip-10-0-1-181 ~]$ openssl rand -base64 20 > mysql_password.txt
+
+[cloud_user@ip-10-0-1-181 ~]$ docker secret create mysql_root_password mysql_root_password.txt # Создание секрета
+qssyrtl9pb3j7ys9q883foe7m
+[cloud_user@ip-10-0-1-181 ~]$ docker secret create mysql_password mysql_password.txt
+x7anz31077cg8zyokq1tzs58u
+
+[cloud_user@ip-10-0-1-181 ~]$ docker secret ls # Проверка
+ID                          NAME                  DRIVER              CREATED             UPDATED
+x7anz31077cg8zyokq1tzs58u   mysql_password                            8 seconds ago       8 seconds ago
+qssyrtl9pb3j7ys9q883foe7m   mysql_root_password                       2 minutes ago       2 minutes ago
+
+# Шаг 3. Create an Overlay Network for the Service
+[cloud_user@ip-10-0-1-181 ~]$ docker network ls # Проверка до создания сети
+NETWORK ID          NAME                DRIVER              SCOPE
+22902c0c20e0        bridge              bridge              local
+4d5dadae7af7        docker_gwbridge     bridge              local
+4981377f8d87        host                host                local
+voxuxn8zaeyw        ingress             overlay             swarm
+a1114d0e62b8        none                null                local
+
+[cloud_user@ip-10-0-1-181 ~]$ docker network create -d overlay mysql_private # Создание сети типа overlay
+kt2hhd6wnrgtrrenl6xgx7vh9
+[cloud_user@ip-10-0-1-181 ~]$ docker network ls # Проверка
+NETWORK ID          NAME                DRIVER              SCOPE
+22902c0c20e0        bridge              bridge              local
+4d5dadae7af7        docker_gwbridge     bridge              local
+4981377f8d87        host                host                local
+voxuxn8zaeyw        ingress             overlay             swarm
+kt2hhd6wnrgt        mysql_private       overlay             swarm # Появилась новая сеть
+a1114d0e62b8        none                null                local
+
+# Шаг 4. Create the MySQL Service
+[cloud_user@ip-10-0-1-181 ~]$ docker service create \ # Создание сервиса
+>      --name mysql_secrets \
+>      --replicas 1 \
+>      --network mysql_private \
+>      --mount type=volume,destination=/var/lib/mysql \
+>      --secret mysql_root_password \
+>      --secret mysql_password \
+>      -e MYSQL_ROOT_PASSWORD_FILE="/run/secrets/mysql_root_password" \
+>      -e MYSQL_PASSWORD_FILE="/run/secrets/mysql_password" \
+>      -e MYSQL_USER="myUser" \
+>      -e MYSQL_DATABASE="myDB" \
+>      mysql:5.7
+y9odehhddk06xk9zxmq15z208
+overall progress: 1 out of 1 tasks
+1/1: running   [==================================================>]
+verify: Service converged
+
+[cloud_user@ip-10-0-1-181 ~]$ docker service ls # Проверка
+ID                  NAME                MODE                REPLICAS            IMAGE               PORTS
+y9odehhddk06        mysql_secrets       replicated          1/1                 mysql:5.7
+
+[cloud_user@ip-10-0-1-181 ~]$ docker ps # Контейнер создался только на manager-node
+CONTAINER ID        IMAGE               COMMAND                  CREATED              STATUS              PORTS                 NAMES
+78363953cb80        mysql:5.7           "docker-entrypoint.s…"   About a minute ago   Up About a minute   3306/tcp, 33060/tcp   mysql_secrets.1.i96phvkgkr81xf9inpj27mw3s
+
+[cloud_user@ip-10-0-1-245 ~]$ docker ps
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+

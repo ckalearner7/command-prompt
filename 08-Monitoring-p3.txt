@@ -1,0 +1,684 @@
+											#####Application Monitoring#####
+###############
+#Using a Client Library#
+###############
+# Шаг 1. Move into the forethought directory:
+cloud_user@fas3c:~$ cd forethought/
+cloud_user@fas3c:~/forethought$ ll
+total 64
+drwxrwxr-x  5 cloud_user cloud_user  4096 Mar  4 13:00 ./
+drwxr-xr-x  8 cloud_user cloud_user  4096 Mar  7 05:36 ../
+-rw-rw-r--  1 cloud_user cloud_user    52 Feb 13  2019 .dockerignore
+-rw-rw-r--  1 cloud_user cloud_user   299 Feb 13  2019 Dockerfile
+-rw-rw-r--  1 cloud_user cloud_user  1134 Feb 13  2019 index.js
+drwxrwxr-x 52 cloud_user cloud_user  4096 Feb 13  2019 node_modules/
+-rw-rw-r--  1 cloud_user cloud_user 11528 Feb 13  2019 nodesource_setup.sh
+-rw-rw-r--  1 cloud_user cloud_user 14156 Feb 13  2019 package-lock.json
+-rw-rw-r--  1 cloud_user cloud_user   349 Feb 13  2019 package.json
+drwxrwxr-x  2 cloud_user cloud_user  4096 Feb 13  2019 public/
+drwxrwxr-x  2 cloud_user cloud_user  4096 Feb 13  2019 views/
+
+# Шаг 2. Install the prom-client via npm, Node.js's package manager:
+#Скачиваем Client Library для языка Node.js через пакетный менеджер npm
+cloud_user@fas3c:~/forethought$  npm install prom-client --save
+npm WARN to-do@1.0.0 No repository field.
+
++ prom-client@12.0.0
+added 3 packages from 3 contributors and audited 155 packages in 0.998s
+found 0 vulnerabilities
+
+# Шаг 3. Open the index.js file, where we'll be adding all of our metrics code:
+#index.js - основной файл приложения 
+cloud_user@fas3c:~/forethought$ vim index.js
+// Require and call Express
+var express = require('express');
+var bodyParser = require('body-parser');
+var app = express();
+
+app.use(bodyParser.urlencoded({ extended: true }));
+app.set('view engine', 'ejs');
+
+// use css
+app.use(express.static("public"));
+
+// placeholder tasks
+var task = [];
+var complete = [];
+
+// add a task
+app.post("/addtask", function(req, res) {
+  var newTask = req.body.newtask;
+  task.push(newTask);
+  res.redirect("/");
+});
+
+// remove a task
+app.post("/removetask", function(req, res) {
+  var completeTask = req.body.check;
+  if (typeof completeTask === "string") {
+    complete.push(completeTask);
+    task.splice(task.indexOf(completeTask), 1);
+  }
+  else if (typeof completeTask === "object") {
+    for (var i = 0; i < completeTask.length; i++) {
+      complete.push(completeTask[i]);
+      task.splice(task.indexOf(completeTask[i]), 1);
+    }
+  }
+  res.redirect("/");
+});
+
+// get website files
+app.get("/", function (req, res) {
+  res.render("index", { task: task, complete: complete });
+});
+
+// listen for connections
+app.listen(8080, function() {
+  console.log('Testing app listening on port 8080')
+});
+
+
+# Шаг 4. Require the use of the prom-client by adding it to our variable list:
+With prom being the name we'll use when calling the client library.
+# Шаг 5. Enable default metrics scraping:
+# Шаг 6. Use Express to create the /metrics endpoint and call in the Prometheus data:
+# После выполнения шагов 4-6 файл index.js будет таким:
+
+// Require and call Express
+var express = require('express');
+var bodyParser = require('body-parser');
+var app = express();
+const prom = require('prom-client'); // Step 4. For monitoring application via Client Library
+
+// Collect default
+// Step 5. For monitoring application via Client Library
+ const collectDefaultMetrics = prom.collectDefaultMetrics; // В prom хранится Client Library
+ collectDefaultMetrics({ prefix: 'forethought' }); // Добавляем префикс для метрик
+
+app.use(bodyParser.urlencoded({ extended: true }));
+app.set('view engine', 'ejs');
+
+// use css
+app.use(express.static("public"));
+
+// placeholder tasks
+var task = [];
+var complete = [];
+
+// add a task
+app.post("/addtask", function(req, res) {
+  var newTask = req.body.newtask;
+  task.push(newTask);
+  res.redirect("/");
+});
+
+// remove a task
+app.post("/removetask", function(req, res) {
+  var completeTask = req.body.check;
+  if (typeof completeTask === "string") {
+    complete.push(completeTask);
+    task.splice(task.indexOf(completeTask), 1);
+  }
+  else if (typeof completeTask === "object") {
+    for (var i = 0; i < completeTask.length; i++) {
+      complete.push(completeTask[i]);
+      task.splice(task.indexOf(completeTask[i]), 1);
+    }
+  }
+  res.redirect("/");
+});
+
+// get website files
+app.get("/", function (req, res) {
+  res.render("index", { task: task, complete: complete });
+});
+
+//Add metrics endpoint
+// Step 6. For monitoring application via Client Library
+ app.get('/metrics', function (req, res) { // Адрес для HTTP-запроса от Prometheus
+   res.set('Content-Type', prom.register.contentType); // Параметры ответа 1
+   res.end(prom.register.metrics()); // Параметры ответа 2
+ });
+
+// listen for connections
+app.listen(8080, function() { // Тестирование приложение возможно по порту 8080
+  console.log('Testing app listening on port 8080')
+});
+
+# Шаг 7. Протестируем приложение по порту 8080
+cloud_user@fas3c:~/forethought$ node index.js
+Testing app listening on port 8080
+
+Увидим только базовые метрики приложения с префиксом forethought 
+
+###############
+#Counters#
+###############
+# Шаг 1. Open up the index.js file:
+cloud_user@fas3c:~/forethought$ vim index.js
+
+# Шаг 2. Define a new metric called forethought_number_of_todos_total that works as a counter:
+// Step 2 - Counters (Custom Metrics). Задаем переменную и определяем метрику
+// Metrics list
+ const todocounter = new prom.Counter({ // Тип счетчик
+   name: 'forethought_number_of_todos_total',
+   help: 'The number of items added to the to-do list, total'
+ });
+
+# Шаг 3. Call the new metric in the addtask post function so it increases by one every time the function is called while adding a task:
+// add a task
+app.post("/addtask", function(req, res) {
+  var newTask = req.body.newtask;
+  task.push(newTask);
+  res.redirect("/");
+  // Step 2 - Counters (Custom Metrics). Вызов переменной и увеличение счетчика при вызове функции /addtask
+  todocounter.inc();
+});
+
+# Шаг 4. Test the application:
+cloud_user@fas3c:~/forethought$ node index.js
+Testing app listening on port 8080
+
+# Шаг 5. While the application is running, visit MYLABSERVER:8080 and add a few tasks to the to-do list.
+
+# Шаг 6. Visit MYLABSERVER:8080/metrics to view your newly created metric!
+
+# Обновленный файл index.js:
+// Require and call Express
+var express = require('express');
+var bodyParser = require('body-parser');
+var app = express();
+const prom = require('prom-client'); // Step 4 - Client Library. For monitoring application via Client Library
+
+// Collect default
+// Step 5 - Client Library. For monitoring application via Client Library
+ const collectDefaultMetrics = prom.collectDefaultMetrics; // В prom хранится Client Library
+ collectDefaultMetrics({ prefix: 'forethought' }); // Добавляем префикс для метрик
+
+// Step 2 - Counters (Custom Metrics). Задаем переменную и определяем метрику
+// Metrics list
+ const todocounter = new prom.Counter({ // Тип счетчик
+   name: 'forethought_number_of_todos_total',
+   help: 'The number of items added to the to-do list, total'
+ });
+
+app.use(bodyParser.urlencoded({ extended: true }));
+app.set('view engine', 'ejs');
+
+// use css
+app.use(express.static("public"));
+
+// placeholder tasks
+var task = [];
+var complete = [];
+
+// add a task
+app.post("/addtask", function(req, res) {
+  var newTask = req.body.newtask;
+  task.push(newTask);
+  res.redirect("/");
+  // Step 3 - Counters (Custom Metrics). Вызов переменной и увеличение счетчика при вызове функции /addtask
+  todocounter.inc();
+});
+
+// remove a task
+app.post("/removetask", function(req, res) {
+  var completeTask = req.body.check;
+  if (typeof completeTask === "string") {
+    complete.push(completeTask);
+    task.splice(task.indexOf(completeTask), 1);
+  }
+  else if (typeof completeTask === "object") {
+    for (var i = 0; i < completeTask.length; i++) {
+      complete.push(completeTask[i]);
+      task.splice(task.indexOf(completeTask[i]), 1);
+    }
+  }
+  res.redirect("/");
+});
+
+// get website files
+app.get("/", function (req, res) {
+  res.render("index", { task: task, complete: complete });
+});
+
+//Add metrics endpoint
+// Step 6 - Client Library. For monitoring application via Client Library
+ app.get('/metrics', function (req, res) { // Адрес для HTTP-запроса от Prometheus
+   res.set('Content-Type', prom.register.contentType); // Параметры ответа 1
+   res.end(prom.register.metrics()); // Параметры ответа 2
+ });
+
+// listen for connections
+app.listen(8080, function() {
+  console.log('Testing app listening on port 8080')
+});
+
+###############
+#Gauges#
+###############
+# Шаг 1. Define the new gauge metric for tracking tasks added and completed:
+// Step 1 - Gauges (Custom Metrics). Задаем переменную и определяем метрику
+const todogauge = new prom.Gauge ({
+  name: 'forethought_current_todos',
+  help: 'Amount of incomplete tasks' // Считает количество невыполненных задач
+});
+
+# Шаг 2. Add a gauge .inc() to the /addtask method:
+// add a task
+app.post("/addtask", function(req, res) {
+  var newTask = req.body.newtask;
+  task.push(newTask);
+  res.redirect("/");
+  // Step 3 - Counters (Custom Metrics). Вызов переменной и увеличение счетчика при вызове функции /addtask
+  todocounter.inc();
+  // Step 2 - Gauges (Custom Metrics). Увеличиваем, когда добавляется задача
+  todogauge.inc();
+});
+
+# Шаг 3. Add a gauge dec() to the /removetask method:
+// remove a task
+app.post("/removetask", function(req, res) {
+  var completeTask = req.body.check;
+  if (typeof completeTask === "string") {
+    complete.push(completeTask);
+    task.splice(task.indexOf(completeTask), 1);
+  }
+  else if (typeof completeTask === "object") {
+    for (var i = 0; i < completeTask.length; i++) {
+      complete.push(completeTask[i]);
+      task.splice(task.indexOf(completeTask[i]), 1);
+      // Step 2 - Gauges (Custom Metrics). Уменьшаем счетчик, когда удаляется задача
+      todogauge.dec();
+    }
+  }
+  res.redirect("/");
+});
+
+# Шаг 4. Test the application:
+cloud_user@fas3c:~/forethought$ node index.js
+Testing app listening on port 8080
+
+# Шаг 5. While the application is running, visit MYLABSERVER:8080 and add a few tasks to the to-do list.
+
+# Шаг 6. Visit MYLABSERVER:8080/metrics to view your newly created metric!
+
+# Обновленный файл index.js:
+// Require and call Express
+var express = require('express');
+var bodyParser = require('body-parser');
+var app = express();
+const prom = require('prom-client'); // Step 4 - Client Library. For monitoring application via Client Library
+
+// Collect default
+// Step 5 - Client Library. For monitoring application via Client Library
+ const collectDefaultMetrics = prom.collectDefaultMetrics; // В prom хранится Client Library
+ collectDefaultMetrics({ prefix: 'forethought' }); // Добавляем префикс для метрик
+
+// Step 2 - Counters (Custom Metrics). Задаем переменную и определяем метрику
+// Metrics list
+ const todocounter = new prom.Counter({ // Тип счетчик
+   name: 'forethought_number_of_todos_total',
+   help: 'The number of items added to the to-do list, total'
+ });
+
+// Step 1 - Gauges (Custom Metrics). Задаем переменную и определяем метрику
+const todogauge = new prom.Gauge ({
+  name: 'forethought_current_todos',
+  help: 'Amount of incomplete tasks' // Считает количество невыполненных задач
+});
+
+app.use(bodyParser.urlencoded({ extended: true }));
+app.set('view engine', 'ejs');
+
+// use css
+app.use(express.static("public"));
+
+// placeholder tasks
+var task = [];
+var complete = [];
+
+// add a task
+app.post("/addtask", function(req, res) {
+  var newTask = req.body.newtask;
+  task.push(newTask);
+  res.redirect("/");
+  // Step 3 - Counters (Custom Metrics). Вызов переменной и увеличение счетчика при вызове функции /addtask
+  todocounter.inc();
+  // Step 2 - Gauges (Custom Metrics). Увеличиваем, когда добавляется задача
+  todogauge.inc();
+});
+
+
+// remove a task
+app.post("/removetask", function(req, res) {
+  var completeTask = req.body.check;
+  if (typeof completeTask === "string") {
+    complete.push(completeTask);
+    task.splice(task.indexOf(completeTask), 1);
+  }
+  else if (typeof completeTask === "object") {
+    for (var i = 0; i < completeTask.length; i++) {
+      complete.push(completeTask[i]);
+      task.splice(task.indexOf(completeTask[i]), 1);
+      // Step 2 - Gauges (Custom Metrics). Уменьшаем счетчик, когда complited-задача
+      todogauge.dec();
+    }
+  }
+  res.redirect("/");
+});
+
+// get website files
+app.get("/", function (req, res) {
+  res.render("index", { task: task, complete: complete });
+});
+
+//Add metrics endpoint
+// Step 6 - Client Library. For monitoring application via Client Library
+ app.get('/metrics', function (req, res) { // Адрес для HTTP-запроса от Prometheus
+   res.set('Content-Type', prom.register.contentType); // Параметры ответа 1
+   res.end(prom.register.metrics()); // Параметры ответа 2
+ });
+
+// listen for connections
+app.listen(8080, function() {
+  console.log('Testing app listening on port 8080')
+});
+
+###############
+#Summaries and Histograms#
+###############
+# Шаг 1. Move into the forethought directory:
+cloud_user@fas3c:~$ cd forethought/
+
+# Шаг 2. Install the Node.js module response-time:
+# response-time - специальный модуль в Node.js, который позволяет измерить время отклика приложения
+cloud_user@fas3c:~/forethought$ npm install response-time --save
+npm WARN to-do@1.0.0 No repository field.
+
++ response-time@2.3.2
+added 2 packages from 2 contributors and audited 158 packages in 0.993s
+found 0 vulnerabilities
+   ╭────────────────────────────────────────────────────────────────╮
+   │                                                                │
+   │      New minor version of npm available! 6.13.4 → 6.14.2       │
+   │   Changelog: https://github.com/npm/cli/releases/tag/v6.14.2   │
+   │               Run npm install -g npm to update!                │
+   │                                                                │
+   ╰────────────────────────────────────────────────────────────────╯
+
+# Шаг 3. Open the index.js file:
+cloud_user@fas3c:~/forethought$ vim index.js
+
+# Шаг 4. Define both the summary and histogram metrics:
+// Step 4 - Summary and Histogram (Custom Metrics). Задаем переменную и определяем метрику
+ const tasksumm = new prom.Summary ({
+   name: 'forethought_requests_summ',
+   help: 'Latency in percentiles',
+ });
+ const taskhisto = new prom.Histogram ({
+   name: 'forethought_requests_hist',
+   help: 'Latency in history form',
+ });
+
+# Шаг 5. Call the response-time module with the other variables:
+var responseTime = require('response-time'); // Step 5 - Summary and Histogram (Custom Metrics). Задаем перемаенную для измерения response time
+
+# Шаг 6. Around where we define our website code, add the response-time function, calling the time parameter within our .observe metrics:
+ // Step 5 - Summary and Histogram (Custom Metrics). Отслеживаем response time
+app.use(responseTime(function (req, res, time) {
+  tasksumm.observe(time);
+  taskhisto.observe(time);
+}));
+
+# Шаг 7. Save and exit the file.
+# Шаг 8. Run the demo application:
+cloud_user@fas3c:~/forethought$ node index.js
+Testing app listening on port 8080
+
+# Шаг 9. View the demo application on port 8080, and add the tasks to generate metrics.
+# Шаг 10. View the /metrics endpoint. Notice how our response times are automatically sorted into percentiles for our summary. Also notice how we're not using all of our buckets in the histogram.
+
+# Шаг 11. Return to the command line and use CTRL+C to close the demo application.
+
+# Шаг 12. Reopen the index.js file:
+cloud_user@fas3c:~/forethought$ vim index.js
+
+# Шаг 13. Add the buckets parameter to the histogram definition. We're going to adjust our buckets based on the response times collected:
+const taskhisto = new prom.Histogram ({
+  name: 'forethought_requests_hist',
+  help: 'Latency in history form',
+  buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10] // Step 13 - Summary and Histogram (Custom Metrics). Задаем интересующие нас интервалы в миллисекундах
+});
+
+# Шаг 14. Save and exit. Run node index.js again to test.
+
+# Обновленный файл index.js:
+// Require and call Express
+var express = require('express');
+var bodyParser = require('body-parser');
+var app = express();
+var responseTime = require('response-time'); // Step 5 - Summary and Histogram (Custom Metrics). Задаем перемаенную для измерения response time
+const prom = require('prom-client'); // Step 4 - Client Library. For monitoring application via Client Library
+
+// Collect default
+// Step 5 - Client Library. For monitoring application via Client Library
+const collectDefaultMetrics = prom.collectDefaultMetrics; // В prom хранится Client Library
+collectDefaultMetrics({ prefix: 'forethought' }); // Добавляем префикс для метрик
+
+// Step 2 - Counters (Custom Metrics). Задаем переменную и определяем метрику
+// Metrics list
+const todocounter = new prom.Counter({ // Тип счетчик
+  name: 'forethought_number_of_todos_total',
+  help: 'The number of items added to the to-do list, total'
+});
+
+// Step 1 - Gauges (Custom Metrics). Задаем переменную и определяем метрику
+const todogauge = new prom.Gauge ({
+  name: 'forethought_current_todos',
+  help: 'Amount of incomplete tasks' // Считает количество невыполненных задач
+});
+
+// Step 4 - Summary and Histogram (Custom Metrics). Задаем переменную и определяем метрику
+const tasksumm = new prom.Summary ({
+  name: 'forethought_requests_summ',
+  help: 'Latency in percentiles',
+});
+const taskhisto = new prom.Histogram ({
+  name: 'forethought_requests_hist',
+  help: 'Latency in history form',
+  buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10] // Step 13 - Summary and Histogram (Custom Metrics). Задаем интересующие нас интервалы в миллисекундах
+});
+
+app.use(bodyParser.urlencoded({ extended: true }));
+app.set('view engine', 'ejs');
+
+// use css
+app.use(express.static("public"));
+
+// placeholder tasks
+var task = [];
+var complete = [];
+
+// add a task
+app.post("/addtask", function(req, res) {
+  var newTask = req.body.newtask;
+  task.push(newTask);
+  res.redirect("/");
+  // Step 3 - Counters (Custom Metrics). Вызов переменной и увеличение счетчика при вызове функции /addtask
+  todocounter.inc();
+  // Step 2 - Gauges (Custom Metrics). Увеличиваем, когда добавляется задача
+  todogauge.inc();
+});
+
+// remove a task
+app.post("/removetask", function(req, res) {
+  var completeTask = req.body.check;
+  if (typeof completeTask === "string") {
+    complete.push(completeTask);
+    task.splice(task.indexOf(completeTask), 1);
+  }
+  else if (typeof completeTask === "object") {
+    for (var i = 0; i < completeTask.length; i++) {
+      complete.push(completeTask[i]);
+      task.splice(task.indexOf(completeTask[i]), 1);
+      // Step 2 - Gauges (Custom Metrics). Уменьшаем счетчик, когда удаляется задача
+      todogauge.dec();
+    }
+  }
+  res.redirect("/");
+});
+
+ // Step 5 - Summary and Histogram (Custom Metrics). Отслеживаем response time
+app.use(responseTime(function (req, res, time) {
+  tasksumm.observe(time);
+  taskhisto.observe(time);
+}));
+
+// get website files
+app.get("/", function (req, res) {
+  res.render("index", { task: task, complete: complete });
+});
+
+//Add metrics endpoint
+// Step 6 - Client Library. For monitoring application via Client Library
+app.get('/metrics', function (req, res) { // Адрес для HTTP-запроса от Prometheus
+  res.set('Content-Type', prom.register.contentType); // Параметры ответа 1
+  res.end(prom.register.metrics()); // Параметры ответа 2
+});
+
+// listen for connections
+app.listen(8080, function() {
+  console.log('Testing app listening on port 8080')
+});
+
+###############
+#Redeploying the Application#
+###############
+# Шаг 1. Stop the current Docker container for our application:
+cloud_user@fas3c:~/forethought$ docker ps
+CONTAINER ID        IMAGE                    COMMAND                  CREATED             STATUS              PORTS                    NAMES
+aab2c21c9b1d        google/cadvisor:latest   "/usr/bin/cadvisor -…"   3 days ago          Up 3 hours          0.0.0.0:8000->8080/tcp   cadvisor
+d5bdb8f28fbb        forethought              "node index.js"          6 days ago          Up 3 hours          0.0.0.0:80->8080/tcp     ft-app
+cloud_user@fas3c:~/forethought$ docker stop ft-app
+ft-app
+cloud_user@fas3c:~/forethought$ docker ps
+CONTAINER ID        IMAGE                    COMMAND                  CREATED             STATUS              PORTS                    NAMES
+aab2c21c9b1d        google/cadvisor:latest   "/usr/bin/cadvisor -…"   3 days ago          Up 3 hours          0.0.0.0:8000->8080/tcp   cadvisor
+
+# Шаг 2. Remove the container:
+cloud_user@fas3c:~/forethought$ docker ps -a
+CONTAINER ID        IMAGE                    COMMAND                  CREATED             STATUS                        PORTS                    NAMES
+aab2c21c9b1d        google/cadvisor:latest   "/usr/bin/cadvisor -…"   3 days ago          Up 3 hours                    0.0.0.0:8000->8080/tcp   cadvisor
+d5bdb8f28fbb        forethought              "node index.js"          6 days ago          Exited (137) 55 seconds ago                            ft-app
+cloud_user@fas3c:~/forethought$ docker rm ft-app
+ft-app
+cloud_user@fas3c:~/forethought$ docker ps -a
+CONTAINER ID        IMAGE                    COMMAND                  CREATED             STATUS              PORTS                    NAMES
+aab2c21c9b1d        google/cadvisor:latest   "/usr/bin/cadvisor -…"   3 days ago          Up 3 hours          0.0.0.0:8000->8080/tcp   cadvisor
+
+# Шаг 3. Remove the image:
+cloud_user@fas3c:~/forethought$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+forethought         latest              532cf27aa4eb        13 months ago       74MB
+node                10-alpine           fe6ff768f798        13 months ago       70.7MB
+google/cadvisor     latest              eb1210707573        16 months ago       69.6MB
+cloud_user@fas3c:~/forethought$ docker image rm forethought
+Untagged: forethought:latest
+Deleted: sha256:532cf27aa4eb67047b0365fafb240de59c65b00748b2a21050289b1dba18e4e1
+Deleted: sha256:c7eef52e97cbe2a9b9b45f24509e415c41adbfdaeada06dec1120c45a961b745
+Deleted: sha256:6c8ad725bfce1037cc68e839c2b4f558171baff71b9150370b439fb9a69b84b7
+Deleted: sha256:735f2831c461366cf0a12cdacb8e7e403b52448b09d2af177d89b3749dac4871
+Deleted: sha256:570f3db733125eab6c52e9ae2fa520d72aa30784f966b0edb1487488966849e0
+Deleted: sha256:07b2942e856c79ed0d83c665400333e1e97c5a24982f9ffe96d17833c6878f6f
+Deleted: sha256:b18a44d72a089c2f5bd90c3d3b588177a67019714ab8664722dccea6224e4832
+Deleted: sha256:74f19c346822984633c45e7b12fdd5675a67640a96c53835456cd3a337ad18e5
+Deleted: sha256:0baebdd12fb869e8cbd4e40d6e50391da94f12e97db884747afcbbf4a798ae2d
+Deleted: sha256:83439efcf897fafcef67b6b6ba03675edffc256a60c92a23eb253b732e94246f
+Deleted: sha256:3f0700b995e02802e521474d2c7a617243f8c7ccc8ccd9f9fba84d3c7e7f02bc
+Deleted: sha256:579bf3b82ad5661b5ff39ad5cffe70d8392c6cba2cca11c986612d1bc8c3d1b4
+Deleted: sha256:01fb756f945ec5b42ae256776054194256af94628810ea64bb0f3621b66672f6
+Deleted: sha256:2ef70095fb56f0cf01cdded291c0284c5bcbf8cf47b2d70f6c9c5096bf78d271
+Deleted: sha256:00d9ad775a51808a8d38206c5846c826bdd26361e3973108f7b3c9a1a44e290e
+Deleted: sha256:1c79ab00f291aad78f9fbddb72c5866d5eb7a3fc8092cd82f40ed33df231935c
+cloud_user@fas3c:~/forethought$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+node                10-alpine           fe6ff768f798        13 months ago       70.7MB
+google/cadvisor     latest              eb1210707573        16 months ago       69.6MB
+
+# Шаг 4. Rebuild the image:
+cloud_user@fas3c:~/forethought$ docker build -t forethought .
+
+# Шаг 5. Deploy the new container:
+cloud_user@fas3c:~/forethought$ docker run --name ft-app -p 80:8080 -d forethought
+86eed9dbd6b25e868f5010a8168b1ee826adb81a6371c4b0717ae57197999ca2
+
+# Шаг 6. Add the application as an endpoint to Prometheus:
+cloud_user@fas4c:~$ sudo vim /etc/prometheus/prometheus.yml
+Добавить мониторинг приложения:
+  - job_name: 'forethought'
+    static_configs:
+    - targets: ['172.31.31.241:80']
+
+# Шаг 7. Restart Prometheus:
+cloud_user@fas4c:/tmp/alertmanager-0.16.1.linux-amd64$ sudo systemctl restart prometheus
+
+# Обновленный файл /etc/prometheus/prometheus.yml:
+# my global config
+global:
+  scrape_interval:     15s # Set the scrape interval to every 15 seconds. Default is every 1 minute.
+  evaluation_interval: 15s # Evaluate rules every 15 seconds. The default is every 1 minute.
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+       - localhost:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: 'prometheus'
+
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+    - targets: ['localhost:9090']
+
+  - job_name: 'grafana'
+    static_configs:
+    - targets: ['localhost:3000']
+
+  - job_name: 'alertmanager'
+    static_configs:
+    - targets: ['localhost:9093']
+
+  - job_name: 'node_exporter_self'
+    static_configs:
+    - targets: ['localhost:9100']
+
+  - job_name: 'node_exporter_worker1'
+    static_configs:
+    - targets: ['172.31.21.148:9100']
+
+  - job_name: 'cadvisor_self'
+    static_configs:
+    - targets: ['localhost:8000']
+
+  - job_name: 'cadvisor_worker1'
+    static_configs:
+    - targets: ['172.31.21.148:8000']
+
+  - job_name: 'forethought'
+    static_configs:
+    - targets: ['172.31.21.148:80']

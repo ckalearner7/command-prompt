@@ -1,0 +1,378 @@
+						
+###############
+#Installing Kubernetes#
+###############
+
+cloud_user@fas3c - master node
+cloud_user@fas4c - worker node 1
+Flannel — решение виртуальной сети, поддержкой которого занимается проект CoreOS. Хорошо проверенное и готовое к production, поэтому стоимость внедрения минимальна.
+
+			#####ALL NODES#####
+#Step 1. Elevate privileges using sudo.
+[cloud_user@fas3c ~]$ sudo su #!!!!!Надо делать через sudo -i, иначе потом kubectl не сработает
+[sudo] password for cloud_user:
+[root@fas3c cloud_user]#
+
+#Step 2. Disable SELinux.
+[root@fas3c cloud_user]# setenforce 0
+[root@fas3c cloud_user]# sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
+
+#Step 3. Enable the br_netfilter module for cluster communication.
+[root@fas3c cloud_user]# modprobe br_netfilter
+[root@fas3c cloud_user]# echo '1' > /proc/sys/net/bridge/bridge-nf-call-iptables
+
+#Step 4. Disable swap to prevent memory allocation issues.
+[root@fas3c cloud_user]# swapoff -a
+[root@fas3c cloud_user]# vim /etc/fstab
+#/root/swap swap swap sw 0 0
+
+#Step 5. Install the Docker prerequisites.
+[root@fas3c cloud_user]# yum install -y yum-utils device-mapper-persistent-data lvm2
+
+#Step 6. Add the Docker repo and install Docker.
+[root@fas3c cloud_user]# yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+[root@fas3c cloud_user]# yum install -y docker-ce
+
+#Step 7. Configure the Docker Cgroup Driver to systemd, enable and start Docker
+[root@fas3c cloud_user]# sed -i '/^ExecStart/ s/$/ --exec-opt native.cgroupdriver=systemd/' /usr/lib/systemd/system/docker.service
+[root@fas3c cloud_user]# systemctl daemon-reload
+[root@fas3c cloud_user]# systemctl enable docker --now
+[root@fas3c cloud_user]# systemctl status docker
+[root@fas3c cloud_user]# docker info | grep -i cgroup
+WARNING: the devicemapper storage-driver is deprecated, and will be removed in a future release.
+WARNING: devicemapper: usage of loopback devices is strongly discouraged for production use.
+         Use `--storage-opt dm.thinpooldev` to specify a custom block storage device.
+ Cgroup Driver: cgroupfs # Не отработало, должно было быть systemd
+
+#Step 8. Add the Kubernetes repo.
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=0
+repo_gpgcheck=0
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
+      https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+
+[root@fas3c cloud_user]# cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+> [kubernetes]
+> name=Kubernetes
+> baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+> enabled=1
+> gpgcheck=0
+> repo_gpgcheck=0
+> gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg
+>       https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+> EOF
+
+#Step 9. Install Kubernetes.
+[root@fas3c cloud_user]# yum install -y kubelet kubeadm kubectl
+
+#Step 10. Enable Kubernetes. The kubelet service will not start until you run kubeadm init.
+[root@fas3c cloud_user]# systemctl enable kubelet
+
+			#####MASTER ONLY#####
+#Step 11. Initialize the cluster using the IP range for Flannel.
+[root@fas3c cloud_user]# kubeadm init --pod-network-cidr=10.244.0.0/16
+
+#Step 12. Copy the kubeadmin join command.
+To start using your cluster, you need to run the following as a regular user:
+
+  mkdir -p $HOME/.kube
+  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+Then you can join any number of worker nodes by running the following on each as root:
+
+kubeadm join 172.31.23.232:6443 --token cjhkwe.ac6ojhwxatp0iv97 \
+    --discovery-token-ca-cert-hash sha256:507abbba2ec1984c5593547d79067f3da18ffc00af0572bc2b0546030357e447
+
+#Step 13. Exit sudo and run the following:
+[root@fas3c cloud_user]# exit
+exit
+[cloud_user@fas3c ~]$
+[cloud_user@fas3c ~]$ mkdir -p $HOME/.kube
+[cloud_user@fas3c ~]$ sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+[sudo] password for cloud_user:
+[cloud_user@fas3c ~]$ sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+[cloud_user@fas3c ~]$ kubectl get nodes
+NAME                           STATUS     ROLES    AGE     VERSION
+fas3c.mylabserver.com   NotReady   master   4m44s   v1.17.3
+
+#Step 14. Deploy Flannel.
+[cloud_user@fas3c ~]$ kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+[cloud_user@fas3c ~]$ kubectl get nodes
+NAME                           STATUS   ROLES    AGE     VERSION
+fas3c.mylabserver.com   Ready    master   6m23s   v1.17.3
+
+#Step 15. Check the cluster state.
+[cloud_user@fas3c ~]$ kubectl get pods --all-namespaces
+NAMESPACE     NAME                                                   READY   STATUS    RESTARTS   AGE
+kube-system   coredns-6955765f44-ccj6h                               1/1     Running   0          6m28s
+kube-system   coredns-6955765f44-tktv2                               1/1     Running   0          6m28s
+kube-system   etcd-fas3c.mylabserver.com                      1/1     Running   0          6m42s
+kube-system   kube-apiserver-fas3c.mylabserver.com            1/1     Running   0          6m42s
+kube-system   kube-controller-manager-fas3c.mylabserver.com   1/1     Running   0          6m42s
+kube-system   kube-flannel-ds-amd64-gwb2n                            1/1     Running   0          80s
+kube-system   kube-proxy-d7pb9                                       1/1     Running   0          6m28s
+kube-system   kube-scheduler-fas3c.mylabserver.com            1/1     Running   0          6m42s
+
+			#####WORKER ONLY#####
+#Step 16. Run the join command that you copied earlier (this command needs to be run as sudo), then check your nodes from the master.
+[root@fas4c cloud_user]# kubeadm join 172.31.23.232:6443 --token cjhkwe.ac6ojhwxatp0iv97 \
+>     --discovery-token-ca-cert-hash sha256:507abbba2ec1984c5593547d79067f3da18ffc00af0572bc2b0546030357e447
+
+[cloud_user@fas3c ~]$ kubectl get nodes # Проверить на master через пару минут
+NAME                           STATUS   ROLES    AGE   VERSION
+fas3c.mylabserver.com   Ready    master   16m   v1.17.3
+fas4c.mylabserver.com   Ready    <none>   32s   v1.17.3
+
+###############
+#Masters and Nodes#
+###############
+[cloud_user@fas3c ~]$ kubectl get pods --all-namespaces -o wide # Вывод pods с указанием node
+NAMESPACE     NAME                                                   READY   STATUS    RESTARTS   AGE   IP              NODE                           NOMINATED NODE   READINESS GATES
+kube-system   coredns-6955765f44-ccj6h                               1/1     Running   0          40m   10.244.0.3      fas3c.mylabserver.com   <none>           <none>
+kube-system   coredns-6955765f44-tktv2                               1/1     Running   0          40m   10.244.0.2      fas3c.mylabserver.com   <none>           <none>
+kube-system   etcd-fas3c.mylabserver.com                      1/1     Running   0          40m   172.31.23.232   fas3c.mylabserver.com   <none>           <none>
+kube-system   kube-apiserver-fas3c.mylabserver.com            1/1     Running   0          40m   172.31.23.232   fas3c.mylabserver.com   <none>           <none>
+kube-system   kube-controller-manager-fas3c.mylabserver.com   1/1     Running   0          40m   172.31.23.232   fas3c.mylabserver.com   <none>           <none>
+kube-system   kube-flannel-ds-amd64-gwb2n                            1/1     Running   0          35m   172.31.23.232   fas3c.mylabserver.com   <none>           <none>
+kube-system   kube-flannel-ds-amd64-s9n8b                            1/1     Running   0          24m   172.31.24.59    fas4c.mylabserver.com   <none>           <none>
+kube-system   kube-proxy-d7pb9                                       1/1     Running   0          40m   172.31.23.232   fas3c.mylabserver.com   <none>           <none>
+kube-system   kube-proxy-xfqhq                                       1/1     Running   0          24m   172.31.24.59    fas4c.mylabserver.com   <none>           <none>
+kube-system   kube-scheduler-fas3c.mylabserver.com            1/1     Running   0          40m   172.31.23.232   fas3c.mylabserver.com   <none>           <none>
+
+[cloud_user@fas3c ~]$ sudo docker ps # Контейнеры на мастере
+[sudo] password for cloud_user:
+CONTAINER ID        IMAGE                  COMMAND                  CREATED             STATUS              PORTS               NAMES
+dde6695a3edf        70f311871ae1           "/coredns -conf /etc…"   37 minutes ago      Up 37 minutes                           k8s_coredns_coredns-6955765f44-ccj6h_kube-system_ea57bd2a-a1eb-4eaf-a3ce-8b53ad4ffae6_0
+576e68d3c049        70f311871ae1           "/coredns -conf /etc…"   37 minutes ago      Up 37 minutes                           k8s_coredns_coredns-6955765f44-tktv2_kube-system_7b93a1f3-d83b-43c2-800b-4739070d34ad_0
+afcaa1af0241        k8s.gcr.io/pause:3.1   "/pause"                 37 minutes ago      Up 37 minutes                           k8s_POD_coredns-6955765f44-tktv2_kube-system_7b93a1f3-d83b-43c2-800b-4739070d34ad_0
+465e6436fe38        k8s.gcr.io/pause:3.1   "/pause"                 37 minutes ago      Up 37 minutes                           k8s_POD_coredns-6955765f44-ccj6h_kube-system_ea57bd2a-a1eb-4eaf-a3ce-8b53ad4ffae6_0
+0cd7b8bbb56b        ff281650a721           "/opt/bin/flanneld -…"   37 minutes ago      Up 37 minutes                           k8s_kube-flannel_kube-flannel-ds-amd64-gwb2n_kube-system_991746e3-87b8-4538-a4f3-e600b1dae16d_0
+2ea56d9570f3        k8s.gcr.io/pause:3.1   "/pause"                 38 minutes ago      Up 38 minutes                           k8s_POD_kube-flannel-ds-amd64-gwb2n_kube-system_991746e3-87b8-4538-a4f3-e600b1dae16d_0
+e35a1e501fc0        ae853e93800d           "/usr/local/bin/kube…"   43 minutes ago      Up 43 minutes                           k8s_kube-proxy_kube-proxy-d7pb9_kube-system_82fc9f68-3ee8-44d8-83eb-d67d8bfd2b1c_0
+65c62a555493        k8s.gcr.io/pause:3.1   "/pause"                 43 minutes ago      Up 43 minutes                           k8s_POD_kube-proxy-d7pb9_kube-system_82fc9f68-3ee8-44d8-83eb-d67d8bfd2b1c_0
+c0252dac0f7a        303ce5db0e90           "etcd --advertise-cl…"   43 minutes ago      Up 43 minutes                           k8s_etcd_etcd-fas3c.mylabserver.com_kube-system_813b4233e5b4cb211dbc981316c12e48_0
+69dea4039ab4        d109c0821a2b           "kube-scheduler --au…"   43 minutes ago      Up 43 minutes                           k8s_kube-scheduler_kube-scheduler-fas3c.mylabserver.com_kube-system_e3025acd90e7465e66fa19c71b916366_0
+276d8a7fc5d3        90d27391b780           "kube-apiserver --ad…"   43 minutes ago      Up 43 minutes                           k8s_kube-apiserver_kube-apiserver-fas3c.mylabserver.com_kube-system_598d7cc40a1d32ad9f1744b530d8053b_0
+759794e2b91e        b0f1517c1f4b           "kube-controller-man…"   43 minutes ago      Up 43 minutes                           k8s_kube-controller-manager_kube-controller-manager-fas3c.mylabserver.com_kube-system_2ec8c951d5bec8c6f385c0a277bf90b1_0
+0674cc94b4c4        k8s.gcr.io/pause:3.1   "/pause"                 43 minutes ago      Up 43 minutes                           k8s_POD_kube-scheduler-fas3c.mylabserver.com_kube-system_e3025acd90e7465e66fa19c71b916366_0
+afa245c5b366        k8s.gcr.io/pause:3.1   "/pause"                 43 minutes ago      Up 43 minutes                           k8s_POD_kube-controller-manager-fas3c.mylabserver.com_kube-system_2ec8c951d5bec8c6f385c0a277bf90b1_0
+d7f1559ac0c4        k8s.gcr.io/pause:3.1   "/pause"                 43 minutes ago      Up 43 minutes                           k8s_POD_kube-apiserver-fas3c.mylabserver.com_kube-system_598d7cc40a1d32ad9f1744b530d8053b_0
+10817a70df88        k8s.gcr.io/pause:3.1   "/pause"                 43 minutes ago      Up 43 minutes                           k8s_POD_etcd-fas3c.mylabserver.com_kube-system_813b4233e5b4cb211dbc981316c12e48_0
+
+						Containers, Orchestration, and Clusters
+###############
+#Pods and Containers#
+###############
+[cloud_user@fas3c ~]$ kubectl get namespaces # Вывести пространства имен
+NAME              STATUS   AGE
+default           Active   2d22h
+kube-node-lease   Active   2d22h
+kube-public       Active   2d22h
+kube-system       Active   2d22h
+
+[cloud_user@fas3c ~]$ kubectl create namespace podexample # Создать протсранство имен
+namespace/podexample created
+
+#Пример создания конфигурационного файла для pod
+[cloud_user@fas3c ~]$ vi ./podexample.yaml
+apiVersion: v1
+kind: Pod #тип объекта
+metadata:
+  name: examplepod #имя pod
+  namespace: pod-example #в каком name живет
+spec:
+  volumes: #тома, которые контейнеры в pod делят между собой
+  - name: html #имя тома
+    emptyDir: {} #директория, прикрепленная за томом
+  containers: #контейнеры в pod
+  - name: webcontainer
+    image: nginx
+    volumeMounts:
+    - name: html #тот же том, что оюъявили в разделе volumes
+      mountPath: /usr/share/nginx/html #директория в контейнере, которая будет ссылаться на том html
+  - name: filecontainer
+    image: debian
+    volumeMounts:
+    - name: html #тот же том, что оюъявили в разделе volumes
+      mountPath: /html
+    command: ["/bin/sh", "-c"]
+    args:
+#      - while true; do
+#         date >> /html/index.html; # работа с томом
+#         sleep 1;
+#        done
+      - echo "done"
+	  
+[cloud_user@fas3c ~]$ kubectl create -f ./pod-example.yaml #Создание объектов в k8s с использованием конфигурационного файла (создаем pod и контейнеры в нем)
+pod/examplepod created
+
+[cloud_user@fas3c ~]$ kubectl --namespace=podexample get pods #Проверка
+NAME         READY   STATUS             RESTARTS   AGE
+examplepod   1/2     CrashLoopBackOff   4          2m53s # Видим много рестартов и статус CrashLoopBackOff => есть проблема | READY = 1/2 - только один контейнер запустился
+
+[cloud_user@fas3c ~]$ sudo docker ps -f name=example # На мастере контейнеров нет 
+[sudo] password for cloud_user:
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+
+[cloud_user@fas4c ~]$ sudo docker ps -f name=example # На ноде запустился nginx
+CONTAINER ID        IMAGE                  COMMAND                  CREATED             STATUS              PORTS               NAMES
+5b87ff3c2ab2        nginx                  "nginx -g 'daemon of…"   28 minutes ago      Up 28 minutes                           k8s_webcontainer_examplepod_podexample_a2a5044a-f66d-496f-a85b-78323b6e6ed4_0
+0ee228c15827        k8s.gcr.io/pause:3.1   "/pause"                 28 minutes ago      Up 28 minutes                           k8s_POD_examplepod_podexample_a2a5044a-f66d-496f-a85b-78323b6e6ed4_0
+
+# Один контейнер не запустился из-за args в ./pod-example.yaml
+
+[cloud_user@fas3c ~]$ kubectl --namespace=podexample delete pod examplepod # Удалить pod
+pod "examplepod" deleted
+
+#Редактируем файл ./pod-example.yaml
+...
+   args:
+      - while true; do
+         date >> /html/index.html;
+         sleep 1;
+        done
+#      - echo "done"
+
+[cloud_user@fas3c ~]$ kubectl create -f ./pod-example.yaml #Пересоздаем pod
+
+[cloud_user@fas3c ~]$ kubectl --namespace=podexample get pods #Проверка - оба контейнера запущены в pod
+NAME         READY   STATUS    RESTARTS   AGE
+examplepod   2/2     Running   0          28s
+
+[cloud_user@fas3c ~]$ sudo docker ps -f name=example # На мастере контейнеров опять нет 
+[sudo] password for cloud_user:
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+
+[cloud_user@fas4c ~]$ sudo docker ps -f name=example # На ноде в этот раз оба контейнера запущены
+[sudo] password for cloud_user:
+CONTAINER ID        IMAGE                  COMMAND                  CREATED             STATUS              PORTS               NAMES
+1b907b8e0086        debian                 "/bin/sh -c 'while t…"   2 minutes ago       Up 2 minutes                            k8s_filecontainer_examplepod_podexample_e6ad5242-4509-4abf-906a-05b764a83934_0
+a5031cdb9573        nginx                  "nginx -g 'daemon of…"   2 minutes ago       Up 2 minutes                            k8s_webcontainer_examplepod_podexample_e6ad5242-4509-4abf-906a-05b764a83934_0
+4aa13f942338        k8s.gcr.io/pause:3.1   "/pause"                 2 minutes ago       Up 2 minutes                            k8s_POD_examplepod_podexample_e6ad5242-4509-4abf-906a-05b764a83934_0
+
+[cloud_user@fas3c ~]$ kubectl --namespace=podexample get pods -o wide # Расширенная проверка, с указанием IP и NODE на которых работают контейнеры pod
+NAME         READY   STATUS    RESTARTS   AGE    IP           NODE                           NOMINATED NODE   READINESS GATES
+examplepod   2/2     Running   0          4m9s   10.244.1.3   fas4c.mylabserver.com   <none>           <none>
+
+[cloud_user@fas3c ~]$ curl 10.244.1.3:80 # WEB-сервер возвращает дату, которую мы записали в pod-example.yaml
+Mon Mar  2 07:34:17 UTC 2020
+Mon Mar  2 07:34:18 UTC 2020
+Mon Mar  2 07:34:19 UTC 2020
+
+[cloud_user@fas3c ~]$ kubectl describe pod examplepod --namespace=podexample # Подробная информация о pod
+Name:         examplepod
+Namespace:    podexample
+Priority:     0
+Node:         fas4c.mylabserver.com/172.31.31.208
+Start Time:   Mon, 02 Mar 2020 07:34:13 +0000
+Labels:       <none>
+Annotations:  <none>
+Status:       Running
+IP:           10.244.1.3
+IPs:
+  IP:  10.244.1.3
+Containers:
+  webcontainer:
+    Container ID:   docker://a5031cdb9573116b82a067568959613822b1bce0a6a314e48ada74fa3594360b
+    Image:          nginx
+    Image ID:       docker-pullable://nginx@sha256:380eb808e2a3b0dd954f92c1cae2f845e6558a15037efefcabc5b4e03d666d03
+    Port:           <none>
+    Host Port:      <none>
+    State:          Running
+      Started:      Mon, 02 Mar 2020 07:34:16 +0000
+    Ready:          True
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /usr/share/nginx/html from html (rw)
+      /var/run/secrets/kubernetes.io/serviceaccount from default-token-p57ks (ro)
+  filecontainer:
+    Container ID:  docker://1b907b8e0086a0670747737795189267b1f9e4d1b1cb1cb1516911c53d682ffd
+    Image:         debian
+    Image ID:      docker-pullable://debian@sha256:a63d0b2ecbd723da612abf0a8bdb594ee78f18f691d7dc652ac305a490c9b71a
+    Port:          <none>
+    Host Port:     <none>
+    Command:
+      /bin/sh
+      -c
+    Args:
+      while true; do date >> /html/index.html; sleep 1; done
+    State:          Running
+      Started:      Mon, 02 Mar 2020 07:34:17 +0000
+    Ready:          True
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /html from html (rw)
+      /var/run/secrets/kubernetes.io/serviceaccount from default-token-p57ks (ro)
+Conditions:
+  Type              Status
+  Initialized       True
+  Ready             True
+  ContainersReady   True
+  PodScheduled      True
+Volumes:
+  html:
+    Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+    Medium:
+    SizeLimit:  <unset>
+  default-token-p57ks:
+    Type:        Secret (a volume populated by a Secret)
+    SecretName:  default-token-p57ks
+    Optional:    false
+QoS Class:       BestEffort
+Node-Selectors:  <none>
+Tolerations:     node.kubernetes.io/not-ready:NoExecute for 300s
+                 node.kubernetes.io/unreachable:NoExecute for 300s
+Events:
+  Type    Reason     Age   From                                   Message
+  ----    ------     ----  ----                                   -------
+  Normal  Scheduled  19m   default-scheduler                      Successfully assigned podexample/examplepod to fas4c.mylabserver.com
+  Normal  Pulling    19m   kubelet, fas4c.mylabserver.com  Pulling image "nginx"
+  Normal  Pulled     19m   kubelet, fas4c.mylabserver.com  Successfully pulled image "nginx"
+  Normal  Created    19m   kubelet, fas4c.mylabserver.com  Created container webcontainer
+  Normal  Started    19m   kubelet, fas4c.mylabserver.com  Started container webcontainer
+  Normal  Pulling    19m   kubelet, fas4c.mylabserver.com  Pulling image "debian"
+  Normal  Pulled     19m   kubelet, fas4c.mylabserver.com  Successfully pulled image "debian"
+  Normal  Created    19m   kubelet, fas4c.mylabserver.com  Created container filecontainer
+  Normal  Started    19m   kubelet, fas4c.mylabserver.com  Started container filecontainer
+
+# Вопрос: как найти volume? Или он временный?
+
+# Список pods по умолчанию:
+
+[cloud_user@fas3c ~]$ kubectl get namespaces
+NAME              STATUS   AGE
+default           Active   3d21h
+kube-node-lease   Active   3d21h
+kube-public       Active   3d21h
+kube-system       Active   3d21h
+podexample        Active   23h
+
+[cloud_user@fas3c ~]$ kubectl get pods -n kube-system
+NAME                                                   READY   STATUS    RESTARTS   AGE
+coredns-6955765f44-2bbj2                               1/1     Running   4          3d21h
+coredns-6955765f44-5jjq9                               1/1     Running   4          3d21h
+etcd-fas3c.mylabserver.com                      1/1     Running   4          3d21h
+kube-apiserver-fas3c.mylabserver.com            1/1     Running   4          3d21h
+kube-controller-manager-fas3c.mylabserver.com   1/1     Running   4          3d21h
+kube-flannel-ds-amd64-5qggn                            1/1     Running   4          3d21h
+kube-flannel-ds-amd64-r4qrd                            1/1     Running   5          3d21h
+kube-proxy-6wx74                                       1/1     Running   4          3d21h
+kube-proxy-n6dqd                                       1/1     Running   4          3d21h
+kube-scheduler-fas3c.mylabserver.com            1/1     Running   4          3d21h
+
+[cloud_user@fas3c ~]$ kubectl get pods -n kube-public
+No resources found in kube-public namespace.
+
+[cloud_user@fas3c ~]$ kubectl get pods -n kube-node-lease
+No resources found in kube-node-lease namespace.
+
+[cloud_user@fas3c ~]$ kubectl get pods -n default
+No resources found in default namespace.
