@@ -825,5 +825,3 @@ f9dd6c8d53ee        mysql:5.7           "docker-entrypoint.s…"   2 minutes ago
 
 # Шаг 4. Complete the Wordpress Setup
 После этого Wordpress будет доступен по Public IP Manager`a http://3.86.70.72/wp-admin/install.php
-cloud_user
-SPZrwEePwU
