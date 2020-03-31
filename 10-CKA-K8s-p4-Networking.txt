@@ -1,0 +1,589 @@
+						Network in k8s
+###############
+#Interfaces IPv4#
+###############
+cloud_user@fas1c:~$ ifconfig
+cni0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet 10.244.0.1  netmask 255.255.255.0  broadcast 0.0.0.0
+
+docker0: flags=4099<UP,BROADCAST,MULTICAST>  mtu 1500
+        inet 172.17.0.1  netmask 255.255.0.0  broadcast 172.17.255.255
+
+ens5: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 9001
+        inet 172.31.110.22  netmask 255.255.240.0  broadcast 172.31.111.255
+
+flannel.1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet 10.244.0.0  netmask 255.255.255.255  broadcast 0.0.0.0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+		
+veth96ed3946: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951 # Вируальный интерфейс
+        inet6 fe80::49e:d3ff:fe55:1c37  prefixlen 64  scopeid 0x20<link>
+        ether 06:9e:d3:55:1c:37  txqueuelen 0  (Ethernet)
+
+				
+###############
+#Route#
+###############
+cloud_user@fas1c:~$ route
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+default         _gateway        0.0.0.0         UG    100    0        0 ens5
+10.244.0.0      0.0.0.0         255.255.255.0   U     0      0        0 cni0
+10.244.1.0      10.244.1.0      255.255.255.0   UG    0      0        0 flannel.1
+10.244.2.0      10.244.2.0      255.255.255.0   UG    0      0        0 flannel.1
+172.17.0.0      0.0.0.0         255.255.0.0     U     0      0        0 docker0
+172.31.96.0     0.0.0.0         255.255.240.0   U     0      0        0 ens5
+_gateway        0.0.0.0         255.255.255.255 UH    100    0        0 ens5
+
+###############
+#Bridge#
+###############
+# Для того, чтобы поды могли общаться друг с другом, используется Ethernet-мост Linux — cbr0 (наверное cni0). Docker использует похожий мост под названием docker0.
+
+cloud_user@fas1c:~$ sudo apt install bridge-utils
+
+cloud_user@fas1c:~$ brctl show
+bridge name     bridge id               STP enabled     interfaces
+cni0            8000.82f44cbd40a8       no              veth96ed3946
+docker0         8000.0242276b4322       no
+
+cloud_user@fas2c:~$ brctl show
+bridge name     bridge id               STP enabled     interfaces
+docker0         8000.02429d22bb0d       no
+
+cloud_user@fas3c:~$ brctl show
+bridge name     bridge id               STP enabled     interfaces
+cni0            8000.baa207895e7e       no              veth3aae9399
+                                                        veth5db986fb
+                                                        vethd8dea94a
+docker0         8000.0242e714493d       no
+
+###############
+#Pod IP address##
+###############
+cloud_user@fas1c:~$ kubectl describe pod nginx-7bb7cd8db5-2cbp2 | grep IP
+IP:           10.244.2.10
+
+###############
+#Сетевая модель K8s#
+###############
+Все контейнеры могут общаться с любыми другими контейнерами без использования NAT.
+Все узлы могут общаться со всеми контейнерами (и наоборот) без использования NAT.
+IP, который видит контейнер, должен быть таким же, как его видят другие.
+
+
+						Network in k8s
+###############
+#Pod and Node Networking#
+###############
+# Материалы: https://kubernetes.io/docs/concepts/cluster-administration/networking/
+# Шаг 1. See which node our pod is on:
+cloud_user@fas1c:~$ kubectl get pods -o wide
+NAME                     READY   STATUS    RESTARTS   AGE   IP            NODE                           NOMINATED NODE   READINESS GATES
+nginx-7bb7cd8db5-2cbp2   1/1     Running   2          22h   10.244.2.10   fas3c.mylabserver.com   <none>           <none>
+
+
+# Шаг 2. Log in to the node:
+ssh fas3c.mylabserver.com
+
+# Шаг 3. View the node's virtual network interfaces:
+cloud_user@fas3c:~$ ifconfig
+cni0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet 10.244.2.1  netmask 255.255.255.0  broadcast 0.0.0.0
+        ether ba:a2:07:89:5e:7e  txqueuelen 1000  (Ethernet)
+
+docker0: flags=4099<UP,BROADCAST,MULTICAST>  mtu 1500
+        inet 172.17.0.1  netmask 255.255.0.0  broadcast 172.17.255.255
+        ether 02:42:e7:14:49:3d  txqueuelen 0  (Ethernet)
+
+ens5: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 9001
+        inet 172.31.97.119  netmask 255.255.240.0  broadcast 172.31.111.255
+        ether 06:12:87:f1:97:d0  txqueuelen 1000  (Ethernet)
+
+flannel.1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet 10.244.2.0  netmask 255.255.255.255  broadcast 0.0.0.0
+        ether 42:8a:12:1f:ba:af  txqueuelen 0  (Ethernet)
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        inet6 ::1  prefixlen 128  scopeid 0x10<host>
+
+veth3aae9399: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet6 fe80::4c19:ccff:fef1:835f  prefixlen 64  scopeid 0x20<link>
+        ether 4e:19:cc:f1:83:5f  txqueuelen 0  (Ethernet)
+
+veth5db986fb: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet6 fe80::24f6:afff:fec0:c1de  prefixlen 64  scopeid 0x20<link>
+        ether 26:f6:af:c0:c1:de  txqueuelen 0  (Ethernet)
+
+vethd8dea94a: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 8951
+        inet6 fe80::74ac:f5ff:fe59:9555  prefixlen 64  scopeid 0x20<link>
+        ether 76:ac:f5:59:95:55  txqueuelen 0  (Ethernet)
+
+# Шаг 4. View the containers in the pod:
+cloud_user@fas3c:~$ sudo docker ps | grep nginx
+[sudo] password for cloud_user:
+f42fe91508ff        nginx                        "nginx -g 'daemon of…"   3 hours ago         Up 3 hours                              k8s_nginx_nginx-7bb7cd8db5-2cbp2_default_7f2ae5d6-3912-49c9-b31b-fd5ece574f25_2
+cf7f936ad3ab        k8s.gcr.io/pause:3.1         "/pause"                 3 hours ago         Up 3 hours                              k8s_POD_nginx-7bb7cd8db5-2cbp2_default_7f2ae5d6-3912-49c9-b31b-fd5ece574f25_36
+
+# Шаг 5. Get the process ID for the container:
+cloud_user@fas3c:~$ sudo docker inspect --format '{{ .State.Pid }}' f42fe91508ff
+22979
+
+# Шаг 6. Use nsenter to run a command in the process's network namespace:
+# Сетевой namespace для контейнера с его интерфейсом
+cloud_user@fas3c:~$ sudo nsenter -t 22979 -n ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+3: eth0@if7: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 8951 qdisc noqueue state UP group default # Связан с седьмым интерфейсом ноды veth5db986fb
+    link/ether 9e:1b:c7:ae:ca:e0 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 10.244.2.10/24 scope global eth0
+       valid_lft forever preferred_lft forever
+
+###############
+#Container Network Interface (CNI)#
+###############
+# Материалы: 
+# https://kubernetes.io/docs/concepts/cluster-administration/networking/
+# https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/#pod-network
+# https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+####Flannel#####
+# Apply the Flannel CNI plugin:
+# Выполняется на этапе создания кластера, kubelet должен понимать, что CNI установлен
+kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/bc79dd1505b0c8681ece4de4c0d86c5cd2643275/Documentation/kube-flannel.yml
+
+###############
+#Service Networking#
+###############
+# Differences between a NodePort service and a ClusterIP service and see how the iptables rules take effect when traffic is coming in.
+
+##### Просто пример NodePort Service #####
+cloud_user@fas1c:~$ vi nodeport-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-nodeport
+spec:
+  type: NodePort
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    nodePort: 30080
+  selector:
+    app: nginx
+
+# Шаг 1. Get the services YAML output for all the services in your cluster (полное описание сервисов):
+cloud_user@fas1c:~$ kubectl get services -o yaml
+apiVersion: v1
+items:
+- apiVersion: v1
+  kind: Service
+  metadata:
+    creationTimestamp: "2020-03-18T09:17:30Z"
+    labels:
+      component: apiserver
+      provider: kubernetes
+    name: kubernetes
+    namespace: default
+    resourceVersion: "154"
+    selfLink: /api/v1/namespaces/default/services/kubernetes
+    uid: bd7b9702-3de5-4d01-9621-fa5015133d61
+  spec:
+    clusterIP: 10.96.0.1
+    ports:
+    - name: https
+      port: 443
+      protocol: TCP
+      targetPort: 6443
+    sessionAffinity: None
+    type: ClusterIP
+  status:
+    loadBalancer: {}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    creationTimestamp: "2020-03-18T12:06:19Z"
+    labels:
+      run: nginx
+    name: nginx
+    namespace: default
+    resourceVersion: "15234"
+    selfLink: /api/v1/namespaces/default/services/nginx
+    uid: d4353a4d-efa8-4b91-ada9-e1fdf72c2751
+  spec:
+    clusterIP: 10.110.121.194
+    externalTrafficPolicy: Cluster
+    ports:
+    - nodePort: 31087
+      port: 80
+      protocol: TCP
+      targetPort: 80
+    selector:
+      run: nginx
+    sessionAffinity: None
+    type: NodePort
+  status:
+    loadBalancer: {}
+kind: List
+metadata:
+  resourceVersion: ""
+  selfLink: ""
+
+# Шаг 2. Try and ping the clusterIP service IP address:
+# Пинга до clusterIP: 10.96.0.1 нет
+cloud_user@fas1c:~$ ping 10.96.0.1
+PING 10.96.0.1 (10.96.0.1) 56(84) bytes of data.
+^C
+--- 10.96.0.1 ping statistics ---
+4 packets transmitted, 0 received, 100% packet loss, time 3050ms
+# Пинга нет потому что не назначено ни одного сетевого интерфейса
+
+# Шаг 3. View the list of services in your cluster:
+cloud_user@fas1c:~$ kubectl get services
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+kubernetes   ClusterIP   10.96.0.1        <none>        443/TCP        2d 
+nginx        NodePort    10.110.121.194   <none>        80:31087/TCP   45h
+
+# Шаг 4. View the list of endpoints in your cluster that get created with a service:
+# Список сущностей, которые связаны с сервисами
+cloud_user@fas1c:~$ kubectl get endpoints
+NAME         ENDPOINTS            AGE
+kubernetes   172.31.110.22:6443   2d # Мастер
+nginx        10.244.2.10:80       45h
+
+# Шаг 5. Look at the iptables rules for your services:
+# Правила FW
+cloud_user@fas1c:~$ sudo iptables-save | grep KUBE | grep nginx
+-A KUBE-NODEPORTS -p tcp -m comment --comment "default/nginx:" -m tcp --dport 31087 -j KUBE-MARK-MASQ
+-A KUBE-NODEPORTS -p tcp -m comment --comment "default/nginx:" -m tcp --dport 31087 -j KUBE-SVC-4N57TFCL4MD7ZTDA
+-A KUBE-SERVICES ! -s 10.244.0.0/16 -d 10.110.121.194/32 -p tcp -m comment --comment "default/nginx: cluster IP" -m tcp --dport 80 -j KUBE-MARK-MASQ # Для общения между подами по порту 80 
+-A KUBE-SERVICES -d 10.110.121.194/32 -p tcp -m comment --comment "default/nginx: cluster IP" -m tcp --dport 80 -j KUBE-SVC-4N57TFCL4MD7ZTDA
+
+###############
+#Ingress Rules and Load Balancers#
+###############
+# Шаг 1. View the list of services:
+cloud_user@fas1c:~$ kubectl get services
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+kubernetes   ClusterIP   10.96.0.1        <none>        443/TCP        2d2h
+nginx        NodePort    10.110.121.194   <none>        80:31087/TCP   47h
+
+# Нет EXTERNAL-IP значит сервисы достуны только по внутренним адресам
+
+# Шаг 2. The load balancer YAML spec:
+# Просто пример настройки servica c типом LoadBalancer
+cloud_user@fas1c:~$ vim nginx-loadbalancer.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-loadbalancer
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: nginx
+	
+# Шаг 3. Create a new deployment:
+kubectl run kubeserve2 --image=chadmcrowell/kubeserve2
+
+# Шаг 4. View the list of deployments:
+kubectl get deployments
+
+# Шаг 5. Scale the deployments to 2 replicas:
+kubectl scale deployment/kubeserve2 --replicas=2
+
+# Шаг 6. View which pods are on which nodes:
+kubectl get pods -o wide
+
+# Шаг 7. Create a load balancer from a deployment:
+kubectl expose deployment kubeserve2 --port 80 --target-port 8080 --type LoadBalancer
+
+# Шаг 8. View the services in your cluster:
+kubectl get services
+
+# Шаг 9. Watch as an external port is created for a service:
+kubectl get services -w
+
+# Шаг 10. Look at the YAML for a service:
+kubectl get services kubeserve2 -o yaml
+
+# Шаг 11. Curl the external IP of the load balancer:
+curl http://[external-ip]
+
+# Шаг 12. View the annotation associated with a service:
+kubectl describe services kubeserve
+
+# Шаг 13. Set the annotation to route load balancer traffic local to the node:
+kubectl annotate service kubeserve2 externalTrafficPolicy=Local
+
+# Шаг 14. The YAML for an Ingress resource:
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: service-ingress
+spec:
+  rules:
+  - host: kubeserve.example.com
+    http:
+      paths:
+      - backend:
+          serviceName: kubeserve2
+          servicePort: 80
+  - host: app.example.com
+    http:
+      paths:
+      - backend:
+          serviceName: nginx
+          servicePort: 80
+  - http:
+      paths:
+      - backend:
+          serviceName: httpd
+          servicePort: 80
+
+# Шаг 15. Edit the ingress rules:
+kubectl edit ingress
+
+# Шаг 16. View the existing ingress rules:
+kubectl describe ingress
+
+# Шаг 17. Curl the hostname of your Ingress resource:
+curl http://kubeserve2.example.com
+
+# Не отработает, потому что нет настройки DNS
+
+###############
+#Cluster DNS#
+###############
+# Шаг 1. View the CoreDNS pods in the kube-system namespace:
+# CoreDNS pods будут только там, где есть поды
+cloud_user@fas1c:~$ kubectl get pods -n kube-system -o wide
+NAME                                                   READY   STATUS    RESTARTS   AGE    IP               NODE                           NOMINATED NODE   READINESS GATES
+coredns-5644d7b6d9-hd88r                               1/1     Running   2          26h    10.244.0.9       fas1c.mylabserver.com   <none>           <none>
+coredns-5644d7b6d9-jb5rx                               1/1     Running   3          30h    10.244.2.9       fas3c.mylabserver.com   <none>           <none>
+etcd-fas1c.mylabserver.com                      1/1     Running   2          30h    172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+kube-apiserver-fas1c.mylabserver.com            1/1     Running   2          30h    172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+kube-controller-manager-fas1c.mylabserver.com   1/1     Running   2          30h    172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+kube-flannel-ds-amd64-cjzgs                            1/1     Running   7          2d3h   172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+kube-flannel-ds-amd64-n9q98                            1/1     Running   7          2d3h   172.31.97.119    fas3c.mylabserver.com   <none>           <none>
+kube-flannel-ds-amd64-p5267                            1/1     Running   4          26h    172.31.102.146   fas2c.mylabserver.com   <none>           <none>
+kube-proxy-44wtt                                       1/1     Running   3          30h    172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+kube-proxy-kwt9w                                       1/1     Running   3          26h    172.31.102.146   fas2c.mylabserver.com   <none>           <none>
+kube-proxy-v4vdb                                       1/1     Running   3          30h    172.31.97.119    fas3c.mylabserver.com   <none>           <none>
+kube-scheduler-fas1c.mylabserver.com            1/1     Running   2          30h    172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+
+# Шаг 2. View the CoreDNS deployment in your Kubernetes cluster:
+cloud_user@fas1c:~$ kubectl get deployments -n kube-system
+NAME      READY   UP-TO-DATE   AVAILABLE   AGE
+coredns   2/2     2            2           2d3h
+
+# Шаг 3. View the service that performs load balancing for the DNS server:
+cloud_user@fas1c:~$ kubectl get services -n kube-system
+NAME       TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)                  AGE
+kube-dns   ClusterIP   10.96.0.10   <none>        53/UDP,53/TCP,9153/TCP   2d3h
+
+# Шаг 4. Spec for the busybox pod and create it:
+cloud_user@fas1c:~$ vim busybox.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox
+  namespace: default
+spec:
+  containers:
+  - image: busybox:1.28.4
+    command:
+      - sleep
+      - "3600"
+    imagePullPolicy: IfNotPresent
+    name: busybox
+  restartPolicy: Always
+  
+cloud_user@fas1c:~$ kubectl create -f busybox.yaml
+pod/busybox created
+
+cloud_user@fas1c:~$ kubectl get pods
+NAME                     READY   STATUS    RESTARTS   AGE
+busybox                  1/1     Running   0          20s
+nginx-7bb7cd8db5-2cbp2   1/1     Running   2          26h
+
+# Шаг 5. View the resolv.conf file that contains the nameserver and search in DNS:
+cloud_user@fas1c:~$ kubectl exec -it busybox -- cat /etc/resolv.conf
+nameserver 10.96.0.10
+search default.svc.cluster.local svc.cluster.local cluster.local us-west-2.compute.internal
+options ndots:5
+
+# Шаг 6. Look up the DNS name for the native Kubernetes service:
+cloud_user@fas1c:~$ kubectl get service
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+kubernetes   ClusterIP   10.96.0.1        <none>        443/TCP        2d4h
+nginx        NodePort    10.110.121.194   <none>        80:31087/TCP   2d1h
+
+cloud_user@fas1c:~$ kubectl exec -it busybox -- nslookup kubernetes
+Server:    10.96.0.10
+Address 1: 10.96.0.10 kube-dns.kube-system.svc.cluster.local
+
+Name:      kubernetes
+Address 1: 10.96.0.1 kubernetes.default.svc.cluster.local
+
+
+# Шаг 7. Look up the DNS names of your pods:
+cloud_user@fas1c:~$ kubectl get pods -o wide
+NAME                     READY   STATUS    RESTARTS   AGE   IP            NODE                           NOMINATED NODE   READINESS GATES
+busybox                  1/1     Running   0          15m   10.244.1.2    fas2c.mylabserver.com   <none>           <none>
+nginx-7bb7cd8db5-2cbp2   1/1     Running   2          26h   10.244.2.10   fas3c.mylabserver.com   <none>           <none>
+
+cloud_user@fas1c:~$ kubectl exec -ti busybox -- nslookup 10-244-1-2.default.pod.cluster.local
+Server:    10.96.0.10
+Address 1: 10.96.0.10 kube-dns.kube-system.svc.cluster.local
+
+Name:      10-244-1-2.default.pod.cluster.local
+Address 1: 10.244.1.2 busybox
+
+# Шаг 8. Look up a service in your Kubernetes cluster:
+cloud_user@fas1c:~$ kubectl exec -it busybox -- nslookup kube-dns.kube-system.svc.cluster.local
+Server:    10.96.0.10
+Address 1: 10.96.0.10 kube-dns.kube-system.svc.cluster.local
+
+Name:      kube-dns.kube-system.svc.cluster.local
+Address 1: 10.96.0.10 kube-dns.kube-system.svc.cluster.local
+
+# Шаг 9. Get the logs of your CoreDNS pods:
+cloud_user@fas1c:~$ kubectl logs coredns-5644d7b6d9-jb5rx -n kube-system
+.:53
+2020-03-20T06:09:32.897Z [INFO] plugin/reload: Running configuration MD5 = f64cb9b977c7dfca58c4fab108535a76
+2020-03-20T06:09:32.897Z [INFO] CoreDNS-1.6.2
+2020-03-20T06:09:32.897Z [INFO] linux/amd64, go1.12.8, 795a3eb
+CoreDNS-1.6.2
+linux/amd64, go1.12.8, 795a3eb
+
+# Шаг 10. YAML spec for a headless service:
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-headless
+spec:
+  clusterIP: None
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app: kubserve2
+	
+# Шаг 11. YAML spec for a custom DNS pod:
+cloud_user@fas1c:~$ vim custom-dns.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: default
+  name: dns-example
+spec:
+  containers:
+    - name: test
+      image: nginx
+  dnsPolicy: "None"
+  dnsConfig:
+    nameservers:
+      - 8.8.8.8
+    searches:
+      - ns1.svc.cluster.local
+      - my.dns.search.suffix
+    options:
+      - name: ndots
+        value: "2"
+      - name: edns0
+	  
+cloud_user@fas1c:~$ kubectl create -f custom-dns.yaml
+pod/dns-example created
+cloud_user@fas1c:~$ kubectl get pods
+NAME                     READY   STATUS    RESTARTS   AGE
+busybox                  1/1     Running   0          45m
+dns-example              1/1     Running   0          8s
+nginx-7bb7cd8db5-2cbp2   1/1     Running   2          27h
+
+cloud_user@fas1c:~$ kubectl exec -it dns-example -- cat /etc/resolv.conf
+nameserver 8.8.8.8
+search ns1.svc.cluster.local my.dns.search.suffix
+options ndots:2 edns0
+
+###############
+#Lab 1. Creating a Service and Discovering DNS Names in Kubernetes#
+###############
+# Задача
+You have been given a three-node cluster. Within that cluster, you must perform the following tasks in order to create a service and resolve the DNS names for that service. You will create the necessary Kubernetes resources in order to perform this DNS query. To adequately complete this hands-on lab, you must have a working deployment, a working service, and be able to record the DNS name of the service within your Kubernetes cluster. This means you will perform the following tasks:
+
+cloud_user@ip-10-0-1-101:~$ kubectl get nodes
+NAME            STATUS   ROLES    AGE    VERSION
+ip-10-0-1-101   Ready    master   160m   v1.13.3
+ip-10-0-1-102   Ready    <none>   160m   v1.13.3
+ip-10-0-1-103   Ready    <none>   160m   v1.13.3
+
+cloud_user@ip-10-0-1-101:~$ kubectl get pods
+No resources found.
+
+# Решение:
+# Шаг 1. Create an nginx deployment using the latest nginx image.
+cloud_user@ip-10-0-1-101:~$ kubectl run nginx --image=nginx
+kubectl run --generator=deployment/apps.v1 is DEPRECATED and will be removed in a future version. Use kubectl run --generator=run-pod/v1 or kubectl create instead.
+deployment.apps/nginx created
+
+# Шаг 2. Verify the deployment has been created successfully.
+cloud_user@ip-10-0-1-101:~$ kubectl get deployments
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   1/1     1            1           29s
+
+# Шаг 3. Create a service from the nginx deployment created in the previous objective.
+cloud_user@ip-10-0-1-101:~$ kubectl expose deployment nginx --port 80 --type NodePort
+service/nginx exposed
+
+# Шаг 4. Verify the service has been created successfully.
+cloud_user@ip-10-0-1-101:~$ kubectl get services
+NAME         TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)        AGE
+kubernetes   ClusterIP   10.96.0.1      <none>        443/TCP        179m
+nginx        NodePort    10.106.25.90   <none>        80:32003/TCP   22s
+
+# Шаг 5. Create a pod that will allow you to perform the DNS query.
+cloud_user@ip-10-0-1-101:~$ vim busybox.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox
+spec:
+  containers:
+  - image: busybox:1.28.4
+    command:
+      - sleep
+      - "3600"
+    name: busybox
+  restartPolicy: Always
+
+cloud_user@ip-10-0-1-101:~$ kubectl create -f busybox.yaml
+pod/busybox created  
+ 
+# Шаг 6. Verify that the pod has been created successfully.
+cloud_user@ip-10-0-1-101:~$ kubectl get pods
+NAME                     READY   STATUS    RESTARTS   AGE
+busybox                  1/1     Running   0          21s
+nginx-7cdbd8cdc9-lwkdn   1/1     Running   0          4m24s
+
+# Шаг 7. Perform the DNS query to the service created in an earlier objective.
+# Use the following command to query the DNS name of the nginx service:
+cloud_user@ip-10-0-1-101:~$ kubectl exec busybox -- nslookup nginx
+Server:    10.96.0.10
+Address 1: 10.96.0.10 kube-dns.kube-system.svc.cluster.local
+
+Name:      nginx
+Address 1: 10.106.25.90 nginx.default.svc.cluster.local
+
+# Шаг 8. Record the DNS name of the service.
+nginx.default.svc.cluster.local

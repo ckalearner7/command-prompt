@@ -1,0 +1,555 @@
+						Managing Data in the Kubernetes Cluster
+###############
+#Persistent Volumes#
+###############
+# Шаг 1. In the Google Cloud Engine, find the region your cluster is in:
+gcloud container clusters list
+
+# Шаг 2. Using Google Cloud, create a persistent disk in the same region as your cluster:
+gcloud compute disks create --size=1GiB --zone=us-central1-a mongodb
+
+# В AWS это EBS. Пример создания:
+aws ec2 create-volume --volume-type gp2 --size 80 --availability-zone us-east-1a mongodb
+	
+
+# Шаг 3. The YAML for a pod that will use persistent disk:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mongodb 
+spec:
+  volumes:
+  - name: mongodb-data # Название тома
+    gcePersistentDisk:
+      pdName: mongodb # Название диска в Google Cloud Engine
+      fsType: ext4
+  containers:
+  - image: mongo
+    name: mongodb
+    volumeMounts:
+    - name: mongodb-data
+      mountPath: /data/db
+    ports:
+    - containerPort: 27017
+      protocol: TCP
+
+# Шаг 4. Create the pod with disk attached and mounted:
+kubectl apply -f mongodb-pod.yaml
+
+# Шаг 5. See which node the pod landed on:
+kubectl get pods -o wide
+
+# Под запущен на ноде gce-cluster-123
+
+# Шаг 6. Connect to the mongodb shell:
+kubectl exec -it mongodb mongo
+
+# Шаг 7. Switch to the mystore database in the mongodb shell:
+use mystore
+
+# Шаг 8. Create a JSON document to insert into the database:
+db.foo.insert({name:'foo'})
+
+# Шаг 9. View the document you just created:
+db.foo.find()
+
+# Шаг 10. Exit from the mongodb shell:
+exit
+
+# Шаг 11. Delete the pod:
+kubectl delete pod mongodb
+
+# Шаг 12. Create a new pod with the same attached disk:
+kubectl apply -f mongodb-pod.yaml
+
+# Шаг 13. Check to see which node the pod landed on:
+kubectl get pods -o wide
+
+# Под опять запущен на той же ноде gce-cluster-123
+
+# Шаг 14. Drain the node (if the pod is on the same node as before):
+kubectl drain gce-cluster-123 --ignore-daemonsets
+
+# Исключаем ноду из расписания DaemonSet, чтобы под на нее не попадал
+# Удаляем под и создаем его заново
+# Под запущен на другой ноде gce-cluster-125
+
+# Шаг 15. Once the pod is on a different node, access the mongodb shell again:
+kubectl exec -it mongodb mongo
+
+# Шаг 16. Access the mystore database again:
+use mystore
+
+# Шаг 17. Find the document you created from before:
+db.foo.find()
+
+# Документ будет найден. Следовательно, диск остался
+
+# Шаг 18. The YAML for a PersistentVolume object in Kubernetes:
+# Создание PV через файл:
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongodb-pv
+spec:
+  capacity: 
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  gcePersistentDisk: # В AWS это awsElasticBlockStore
+    pdName: mongodb
+    fsType: ext4
+
+# Шаг 19. Create the Persistent Volume resource:
+kubectl apply -f mongodb-persistentvolume.yaml
+
+# Шаг 20. View our Persistent Volumes:
+kubectl get persistentvolumes
+
+###############
+#Volume Access Modes#
+###############
+# Материалы: https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes
+
+# ReadWriteOnce – the volume can be mounted as read-write by a single node
+# ReadOnlyMany – the volume can be mounted read-only by many nodes
+# ReadWriteMany – the volume can be mounted as read-write by many nodes
+
+# Шаг 1. The YAML for a Persistent Volume:
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongodb-pv
+spec:
+  capacity: 
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  gcePersistentDisk:
+    pdName: mongodb
+    fsType: ext4
+
+# Шаг 2. View the Persistent Volumes in your cluster:
+kubectl get pv
+
+###############
+#Persistent Volume Claims#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims
+# https://kubernetes.io/docs/tasks/configure-pod-container/configure-persistent-volume-storage/#create-a-persistentvolumeclaim
+
+# Persistent Volume Claims (PVCs) are a way for an application developer to request storage for the application without having to know where the underlying storage is. The claim is then bound to the Persistent Volume (PV), and it will not be released until the PVC is deleted. 
+
+# PersistentVolumeClaim (PVC) есть не что иное как запрос к Persistent Volumes на хранение от пользователя. Это аналог создания Pod на ноде. Поды могут запрашивать определенные ресурсы ноды, то же самое делает и PVC. Основные параметры запроса: объем pvc и тип доступа
+
+# Шаг 1. The YAML for a PVC:
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc 
+spec:
+  resources:
+    requests:
+      storage: 1Gi
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: ""
+
+# Шаг 2. Create a PVC:
+kubectl apply -f mongodb-pvc.yaml
+
+# Шаг 3. View the PVC in the cluster:
+kubectl get pvc
+
+# Шаг 4. View the PV to ensure it’s bound:
+kubectl get pv # PV был создан в предыдущем уроке, поэтому он сразу примонтировался
+
+# Шаг 5. The YAML for a pod that uses a PVC:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mongodb 
+spec:
+  containers:
+  - image: mongo
+    name: mongodb
+    volumeMounts:
+    - name: mongodb-data
+      mountPath: /data/db
+    ports:
+    - containerPort: 27017
+      protocol: TCP
+  volumes:
+  - name: mongodb-data
+    persistentVolumeClaim: # Связываем Pod с PVC
+      claimName: mongodb-pvc
+
+# Шаг 6. Create the pod with the attached storage:
+kubectl apply -f mongo-pvc-pod.yaml
+
+# Шаг 7. Access the mogodb shell:
+kubectl exec -it mongodb mongo
+
+# Шаг 8. Find the JSON document created in previous lessons:
+db.foo.find()
+
+# JSON-файл найден, так как PV не удалялся
+
+# Шаг 9. Delete the mongodb pod:
+kubectl delete pod mogodb
+
+# Шаг 10. Delete the mongodb-pvc PVC:
+kubectl delete pvc mongodb-pvc
+
+# Шаг 11. Check the status of the PV:
+kubectl get pv
+
+# У PV будет статус Release - освобожден, но не удален
+
+# persistentVolumeReclaimPolicy — что будет происходить с pv после удаления pvc. Могут быть 3 варианта:
+	#Retain — pv удален не будет.
+	#Recycle — pv будет очищен.
+	#Delete — pv будет удален.
+
+# Шаг 12. The YAML for the PV to show its reclaim policy:
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongodb-pv
+spec:
+  capacity: 
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain #Retain — pv удален не будет.
+  gcePersistentDisk:
+    pdName: mongodb
+    fsType: ext4
+	
+###############
+#Storage Objects#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/storage/persistent-volumes/#storage-object-in-use-protection
+# https://kubernetes.io/docs/concepts/storage/volumes/
+	
+# StorageClass позволяет описать классы хранения, которые предлагают хранилища. Например, они могут отличаться по скорости, по политикам бэкапа, либо какими-то еще произвольными политиками. Каждый StorageClass содержит поля provisioner, parameters и reclaimPolicy, которые используются, чтобы динамически создавать PersistentVolume.
+
+# Можно создать дефолтный StorageClass для тех PVC, которые его вообще не указывают. Так же storage class хранит параметры подключения к реальному хранилищу. PVC используют эти параметры для подключения хранилища к подам.
+
+	##### Защита при удалении PVC #####
+# Шаг 1. See the PV protection on your volume:
+kubectl describe pv mongodb-pv
+
+# В Source будет указано какой диск использует том
+# В Finalizers - будет pv-protection
+
+# Шаг 2. See the PVC protection for your claim:
+kubectl describe pvc mongodb-pvc
+
+# В Finalizers - будет pvc-protection
+
+# Шаг 3. Delete the PVC:
+kubectl delete pvc mongodb-pvc
+
+# Шаг 4. See that the PVC is terminated, but the volume is still attached to pod:
+kubectl get pvc
+
+# PVC будет в состоянии Terminating
+
+# Шаг 5. Try to access the data, even though we just deleted the PVC:
+kubectl exec -it mongodb mongo
+use mystore
+db.foo.find()
+
+# Несмотря на то, что PVC был удален, Pod не потерял доступа к файлам на PV
+
+# Шаг 6. Delete the pod, which finally deletes the PVC:
+kubectl delete pods mongodb
+
+# Шаг 7. Show that the PVC is deleted:
+kubectl get pvc
+
+# Если теперь удалить Pod, то PVC исчезнет совсем (до этого он был в состоянии Terminating)
+
+	##### Создание StorageClass #####
+# Шаг 8. YAML for a StorageClass object:
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast
+provisioner: kubernetes.io/gce-pd # Тип provisioner`a
+parameters:
+  type: pd-ssd # Тип диска
+
+# Шаг 9. Create the StorageClass type "fast":
+kubectl apply -f sc-fast.yaml
+
+# Шаг 10. Change the PVC to include the new StorageClass object:
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc 
+spec:
+  storageClassName: fast # Ссылаемся на StorageClass
+  resources:
+    requests:
+      storage: 100Mi
+  accessModes:
+    - ReadWriteOnce
+
+# Шаг 11. Create the PVC with automatically provisioned storage:
+kubectl apply -f mongodb-pvc.yaml
+
+# Шаг 12. View the PVC with new StorageClass:
+kubectl get pvc
+
+# Шаг 13. View the newly provisioned storage:
+kubectl get pv
+
+# Создастся автоматически с persistentVolumeReclaimPolicy = Delete
+
+	#####Пример с созданием hostPath-volume#####
+# Шаг 14. The YAML for a hostPath PV:
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-hostpath
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/data"
+
+	#####Пример с созданием empty directory volume#####
+# Шаг 15. The YAML for a pod with an empty directory volume:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: emptydir-pod
+spec:
+  containers:
+  - image: busybox
+    name: busybox
+    command: ["/bin/sh", "-c", "while true; do sleep 3600; done"]
+    volumeMounts:
+    - mountPath: /tmp/storage
+      name: vol
+  volumes:
+  - name: vol
+    emptyDir: {} # https://kubernetes.io/docs/concepts/storage/volumes/#emptydir
+	
+###############
+#Applications with Persistent Storage#
+###############
+	#####Дисковая часть#####
+# Шаг 1. The YAML for our StorageClass object:
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast
+provisioner: kubernetes.io/gce-pd
+parameters:
+  type: pd-ssd
+
+# Шаг 2. The YAML for our PVC:
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kubeserve-pvc 
+spec:
+  storageClassName: fast
+  resources:
+    requests:
+      storage: 100Mi
+  accessModes:
+    - ReadWriteOnce
+
+# Шаг 3. Create our StorageClass object:
+kubectl apply -f storageclass-fast.yaml
+
+# Шаг 4. View the StorageClass objects in your cluster:
+kubectl get sc
+
+# Шаг 5. Create our PVC:
+kubectl apply -f kubeserve-pvc.yaml
+
+# Шаг 6. View the PVC created in our cluster:
+kubectl get pvc
+
+# Шаг 7. View our automatically provisioned PV:
+kubectl get pv
+
+#Создается автоматически, так как StorageClass задан в PVC
+
+	#####Application часть#####
+# Шаг 8. The YAML for our deployment:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeserve
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeserve
+  template:
+    metadata:
+      name: kubeserve
+      labels:
+        app: kubeserve
+    spec:
+      containers:
+      - env:
+        - name: app
+          value: "1"
+        image: linuxacademycontent/kubeserve:v1
+        name: app
+        volumeMounts:
+        - mountPath: /data
+          name: volume-data
+      volumes:
+      - name: volume-data
+        persistentVolumeClaim:
+          claimName: kubeserve-pvc
+
+# Шаг 9. Create our deployment and attach the storage to the pods:
+kubectl apply -f kubeserve-deployment.yaml
+
+# Шаг 10. Check the status of the rollout:
+kubectl rollout status deployments kubeserve
+
+# Шаг 11. Check the pods have been created:
+kubectl get pods
+
+# Шаг 12. Connect to our pod and create a file on the PV:
+kubectl exec -it [pod-name] -- touch /data/file1.txt
+
+# Шаг 13. Connect to our pod and list the contents of the /data directory:
+kubectl exec -it [pod-name] -- ls /data
+
+###############
+#Lab 1. Creating Persistent Storage for Pods in Kubernetes#
+###############
+You have been given access to a two-node cluster. Your objective is to create persistent storage for the pod, and prove that the data resides on disk, even when you delete the pod. You must first create a PersistentVolume object in Kubernetes. Once the PersistentVolume has been created, you must create a PersistentVolumeClaim in order for you to claim that volume for the pod. Once you have your PersistentVolume and PersistentVolumeClaim, you are now ready to create the pod.
+
+Create the pod with the image redis and include the volume, mounted to the /data directory. Also, ensure that port 6379 is open on the container. Once you've created the pod, connect to it and write some data to the database using the redis-cli, then use the QUIT command to exit the redis-cli. Then, delete the pod and create a new pod that will mount that same volume. Connect to the new redis pod and retreive the data that you wrote to the database on the first pod. This will prove that the data persists beyond the life of the pod. Perform the following tasks:
+
+Create a PersistentVolume named redis-pv with 1Gi of storage and ReadWriteOnce access mode. Mount the PersistentVolume to the /mnt/data directory on the host
+Create a PersistentVolumeClaim named redisdb-pvc with a request for 1Gi of storage. Make sure it has the same access mode as the PersistentVolume
+Create a pod named redispod using the redis image and a container name of redisdb. The mount path on the container must be /data and you must open port 6379 on the container. Make sure you mount the same PVC that you created in the last step
+Connect to the container by running the redis-cli command from within the container. Use the SET command to apply the key space server:name as "redis server". Use the GET command to verify that the server:name keyspace has been set. Use the QUIT command to exit the redis-cli
+Delete the pod named redispod
+Open the pod yaml and change the name of the pod to redispod2. Create the new pod with that YAML spec
+Connect to the redispod2 container and run the redis-cli from within the container. Run the command GET server:name to retrieve the keyspace that we set with the previous pod. The result will be "redis server", which means the data persisted from redispod to redispod2.
+Having persistent storage means that we can use that same volume with different pods in our Kubernetes cluster and access the same data.
+
+
+# Шаг 1. Create a PersistentVolume.
+	# Шаг 1.1 Use the following YAML spec for the PersistentVolume named redis-pv.yaml:
+	cloud_user@ip-10-0-1-101:~$ vim redis-pv.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: redis-pv
+spec:
+  storageClassName: ""
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/data"
+
+	# Шаг 1.2 Then, create the PersistentVolume:
+	cloud_user@ip-10-0-1-101:~$ kubectl apply -f redis-pv.yaml
+
+# Шаг 2. Create a PersistentVolumeClaim.
+	# Шаг 2.1 Use the following YAML spec for the PersistentVolumeClaim named redis-pvc.yaml:
+	cloud_user@ip-10-0-1-101:~$ vim redis-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redisdb-pvc
+spec:
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+	# Шаг 2.2 Then, create the PersistentVolumeClaim:
+	cloud_user@ip-10-0-1-101:~$ kubectl apply -f redis-pvc.yaml
+
+# Шаг 3. Create the redispod image, with a mounted volume to mount path `/data`
+	# Шаг 3.1 Use the following YAML spec for the pod named redispod.yaml:
+	cloud_user@ip-10-0-1-101:~$ vim redispod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redispod
+spec:
+  containers:
+  - image: redis
+    name: redisdb
+    volumeMounts:
+    - name: redis-data
+      mountPath: /data # Директория контейнера
+    ports:
+    - containerPort: 6379
+      protocol: TCP
+  volumes:
+  - name: redis-data
+    persistentVolumeClaim:
+      claimName: redisdb-pvc
+
+	# Шаг 3.2 Then, create the pod:
+	cloud_user@ip-10-0-1-101:~$ kubectl apply -f redispod.yaml
+
+	# Шаг 3.3 Verify the pod was created:
+	cloud_user@ip-10-0-1-101:~$ kubectl get pods
+	NAME       READY   STATUS    RESTARTS   AGE
+	redispod   1/1     Running   0          10s
+
+# Шаг 4. Connect to the container and write some data.
+	# Шаг 4.1 Connect to the container and run the redis-cli:
+	kubectl exec -it redispod redis-cli
+
+	# Шаг 4.2 Set the key space server:name and value "redis server":
+	SET server:name "redis server"
+
+	# Шаг 4.3 Run the GET command to verify the value was set:
+	GET server:name
+
+	# Шаг 4.4 Exit the redis-cli:
+	QUIT
+	
+# Шаг 5. Delete `redispod` and create a new pod named `redispod2`.
+	# Шаг 5.1 Delete the existing redispod:
+	cloud_user@ip-10-0-1-101:~$ kubectl delete pod redispod
+
+	# Шаг 5.2 Open the file redispod.yaml and change line 4 from name: redispod to:
+	name: redispod2
+
+	# Шаг 5.3 Create a new pod named redispod2:
+	kubectl apply -f redispod.yaml
+	
+# Шаг 6. Verify the volume has persistent data.
+	# Шаг 6.1 Connect to the container and run redis-cli:
+	cloud_user@ip-10-0-1-101:~$ kubectl exec -it redispod2 redis-cli
+
+	# Шаг 6.2 Run the GET command to retrieve the data written previously:
+	GET server:name
+
+	# Шаг 6.3 Exit the redis-cli:
+	QUIT

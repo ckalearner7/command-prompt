@@ -1,0 +1,329 @@
+						Understanding Kubernetes Architecture
+###############
+#Cluster Architecture#
+###############
+
+# Теория https://interactive.linuxacademy.com/diagrams/ThePodofMinerva.html
+
+# Список нод
+[root@fas1c ~]# kubectl get nodes
+NAME                           STATUS    ROLES     AGE       VERSION
+fas1c.mylabserver.com   Ready     master    27d       v1.11.3
+fas2c.mylabserver.com   Ready     <none>    27d       v1.11.3
+
+# Список всех подов на нодах
+[root@fas1c ~]# kubectl get pods --all-namespaces
+NAMESPACE     NAME                                                   READY     STATUS    RESTARTS   AGE
+default       comicbox-78454f85d-lwqv4                               1/1       Running   3          26d
+
+# Расширенный список всех подов на нодах
+[root@fas1c ~]# kubectl get pods --all-namespaces -o wide 
+NAMESPACE     NAME                                                   READY     STATUS    RESTARTS   AGE       IP              NODE                           NOMINATED NODE
+default       comicbox-78454f85d-lwqv4                               1/1       Running   3          26d       10.244.1.25     fas2c.mylabserver.com   <none>
+
+# Список namespaces
+[root@fas1c ~]# kubectl get namespaces
+NAME          STATUS    AGE
+default       Active    27d
+kube-public   Active    27d
+kube-system   Active    27d
+monitoring    Active    27d
+
+# Пример быстрого создания pod
+[root@fas1c ~]# cat << EOF | kubectl create -f -
+> apiVersion: v1
+> kind: Pod
+> metadata:
+>   name: nginx
+> spec:
+>   containers:
+>   - name: nginx
+>     image: nginx
+> EOF
+pod/nginx created
+
+[root@fas1c ~]# kubectl get pods | grep nginx
+NAME                                     READY     STATUS    RESTARTS   AGE
+nginx                                    1/1       Running   0          10s
+
+# Полное описание пода
+[root@fas1c ~]# kubectl describe pod nginx
+Name:               nginx
+Namespace:          default
+Priority:           0
+PriorityClassName:  <none>
+Node:               fas2c.mylabserver.com/172.31.28.149
+Start Time:         Tue, 17 Mar 2020 13:59:27 +0000
+Labels:             <none>
+Annotations:        <none>
+Status:             Running
+IP:                 10.244.1.27
+Containers:
+  nginx:
+    Container ID:   docker://0f33c67db32bb8d248a5f0f112249619118f20d4d77849f291e41dba9f351004
+    Image:          nginx
+    Image ID:       docker-pullable://nginx@sha256:2539d4344dd18e1df02be842ffc435f8e1f699cfc55516e2cf2cb16b7a9aea0b
+    Port:           <none>
+    Host Port:      <none>
+    State:          Running
+      Started:      Tue, 17 Mar 2020 13:59:36 +0000
+    Ready:          True
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from default-token-stbht (ro)
+Conditions:
+  Type              Status
+  Initialized       True
+  Ready             True
+  ContainersReady   True
+  PodScheduled      True
+Volumes:
+  default-token-stbht:
+    Type:        Secret (a volume populated by a Secret)
+    SecretName:  default-token-stbht
+    Optional:    false
+QoS Class:       BestEffort
+Node-Selectors:  <none>
+Tolerations:     node.kubernetes.io/not-ready:NoExecute for 300s
+                 node.kubernetes.io/unreachable:NoExecute for 300s
+Events:
+  Type    Reason     Age   From                                   Message
+  ----    ------     ----  ----                                   -------
+  Normal  Scheduled  1m    default-scheduler                      Successfully assigned default/nginx to fas2c.mylabserver.com
+  Normal  Pulling    1m    kubelet, fas2c.mylabserver.com  pulling image "nginx"
+  Normal  Pulled     1m    kubelet, fas2c.mylabserver.com  Successfully pulled image "nginx"
+  Normal  Created    1m    kubelet, fas2c.mylabserver.com  Created container
+  Normal  Started    1m    kubelet, fas2c.mylabserver.com  Started container
+
+# Удаление пода
+[root@fas1c ~]# kubectl delete pod nginx
+pod "nginx" deleted
+
+###############
+#Kubernetes API Primitives#
+###############
+
+# Показать состояние основных компонентов кластера
+[root@fas1c ~]# kubectl get componentstatus
+NAME                 STATUS    MESSAGE              ERROR
+scheduler            Healthy   ok
+controller-manager   Healthy   ok
+etcd-0               Healthy   {"health": "true"}
+
+# Описание yml-файла на примере deployment и его создание
+[root@fas1c ~]# vim nginx.yaml
+#Касается deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+#Касается replicas и pod
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: nginx
+	#Касается контейнера
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.7.9
+        ports:
+        - containerPort: 80
+		
+[root@fas1c ~]# kubectl create -f nginx.yaml
+deployment.apps/nginx-deployment created
+
+# Полное описание созданного YML-файла
+[root@fas1c ~]# kubectl get deployment nginx-deployment -o yaml 
+
+# Показать метки для подов
+[root@fas1c ~]# kubectl get pods --show-labels | grep nginx
+nginx-deployment-67594d6bf6-lvsxj        1/1       Running   0          55m       app=nginx,pod-template-hash=2315082692
+nginx-deployment-67594d6bf6-qk99c        1/1       Running   0          55m       app=nginx,pod-template-hash=2315082692
+
+# Добавить label
+[root@fas1c ~]# kubectl label pods nginx-deployment-67594d6bf6-lvsxj env=prod
+pod/nginx-deployment-67594d6bf6-lvsxj labeled
+[root@fas1c ~]# kubectl get pods --show-labels | grep nginx
+nginx-deployment-67594d6bf6-lvsxj        1/1       Running   0          57m       app=nginx,env=prod,pod-template-hash=2315082692
+nginx-deployment-67594d6bf6-qk99c        1/1       Running   0          57m       app=nginx,pod-template-hash=2315082692
+
+# Показать конкретную метку
+[root@fas1c ~]# kubectl get pods -L env
+NAME                                     READY     STATUS    RESTARTS   AGE       ENV
+nginx-deployment-67594d6bf6-lvsxj        1/1       Running   0          59m       prod
+nginx-deployment-67594d6bf6-qk99c        1/1       Running   0          59m
+
+# Добавить аннотацию
+[root@fas1c ~]# kubectl annotate deployment nginx-deployment mycompany.com/someannotation="chad"
+deployment.extensions/nginx-deployment annotated
+[root@fas1c ~]# kubectl get deployment nginx-deployment -o yaml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    mycompany.com/someannotation: chad
+
+# Поиск по статусу
+[root@fas1c ~]# kubectl get pods --field-selector status.phase=Running | grep nginx
+nginx-deployment-67594d6bf6-lvsxj        1/1       Running   0          1h
+nginx-deployment-67594d6bf6-qk99c        1/1       Running   0          1h
+
+# Комбинированный поиск
+[root@fas1c ~]# kubectl get pods --field-selector status.phase=Running,metadata.namespace=default | grep nginx
+nginx-deployment-67594d6bf6-lvsxj        1/1       Running   0          1h
+nginx-deployment-67594d6bf6-qk99c        1/1       Running   0          1h
+
+# Комбинированный поиск с условием
+[root@fas1c ~]# kubectl get pods --field-selector status.phase=Running,metadata.namespace!=default | grep nginx
+No resources found.
+
+###############
+#Kubernetes Services and Network Primitives#
+###############
+
+# У каждого пода свой IP внутри одного адресного пространства
+[root@fas1c ~]# kubectl get pods -o wide | grep nginx
+nginx-deployment-67594d6bf6-lvsxj        1/1       Running   1          15h       10.244.1.36   fas2c.mylabserver.com   <none>
+nginx-deployment-67594d6bf6-qk99c        1/1       Running   1          15h       10.244.1.31   fas2c.mylabserver.com   <none>
+
+# Создание сервиса
+[root@fas1c ~]# vim nginx-nodeport.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-nodeport
+spec:
+  type: NodePort # открывает порт ноды во внешнюю сеть
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80 # Порт пода (трафик перенаправляется с порта ноды)
+    nodePort: 30080 # Порт ноды (трафик приходит на него)
+  selector:
+    app: nginx # лэйбл подов
+	
+[root@fas1c ~]# kubectl create -f nginx-nodeport.yaml
+service/nginx-nodeport created
+
+[root@fas1c ~]# kubectl get services nginx-nodeport
+NAME             TYPE       CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+nginx-nodeport   NodePort   10.107.110.208   <none>        80:30080/TCP   1m
+
+[root@fas1c ~]# curl localhost:30080 # будет соединение (внешнее взаимодействие)
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   612  100   612    0     0  14962      0 --:--:-- --:--:-- --:--:-- 15300
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+
+# Поднимаем под с busybox (пустой контейнер)
+cat << EOF | kubectl create -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox
+spec:
+  containers:
+  - name: busybox
+    image: radial/busyboxplus:curl
+    args:
+    - sleep
+    - "1000"
+EOF
+
+[root@fas1c ~]# kubectl get pods
+NAME                                     READY     STATUS    RESTARTS   AGE
+busybox                                  1/1       Running   0          24s
+nginx-deployment-67594d6bf6-lvsxj        1/1       Running   1          15h
+nginx-deployment-67594d6bf6-qk99c        1/1       Running   1          15h
+
+[root@fas1c ~]# kubectl get services | grep nginx
+nginx-nodeport     NodePort    10.107.110.208   <none>        80:30080/TCP        14m
+
+# Выполним curl c busybox на сервис nginx по IP 10.107.110.208 и внутреннему порту пода 80 
+[root@fas1c ~]# kubectl exec busybox -- curl 10.107.110.208:80 # (внутреннее взаимодействие)
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   612  100   612    0     0  14962      0 --:--:-- --:--:-- --:--:-- 15300
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+
+# Nginx отвечает потому что kube-proxy создает запись для IP Tables и поды могут общаться между собой по внутреннему порту
+
+###############
+#Lab 1. Exploring the Kubernetes Cluster via the Command Line#
+###############
+# Шаг 1. List all the nodes in the cluster.
+kubectl get nodes
+
+# Шаг 2. List all the pods in all namespaces.
+kubectl get pods --all-namespaces
+
+# Шаг 3. List all the namespaces in the cluster.
+kubectl get namespaces
+
+# Шаг 4. Check to see if there are any pods running in the default namespace.
+kubectl get pods
+
+# Шаг 5. Find the IP address of the API server running on the master node.
+kubectl get pods --all-namespaces -o wide
+
+# Шаг 6. See if there are any deployments in this cluster.
+kubectl get deployments
+
+# Шаг 7. Find the label applied to the etcd pod on the master node.
+kubectl get pods --all-namespaces --show-labels -o wide

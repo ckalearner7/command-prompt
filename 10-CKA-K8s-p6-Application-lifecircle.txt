@@ -1,0 +1,646 @@
+						Application Lifecycle Management 
+###############
+#Deploying Applications in the Kubernetes Cluster#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+# https://kubernetes.io/docs/tutorials/kubernetes-basics/deploy-app/deploy-intro/
+# https://kubernetes.io/docs/tutorials/kubernetes-basics/update/update-intro/
+
+# Plan:
+# Create and roll out a deployment, and verify the deployment was successful.
+# Verify the application is using the correct version.
+# Scale up your application to create high availability.
+# Create a service from your deployment, so users can access your application.
+# Perform a rolling update to version 2 of the application.
+# Verify the app is now at version 2 and there was no downtime to end users.
+
+# Шаг 1. The YAML for a deployment:
+cloud_user@fas1c:~$ vim kubeserve-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeserve
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kubeserve
+  template:
+    metadata:
+      name: kubeserve
+      labels:
+        app: kubeserve
+    spec:
+      containers:
+      - image: linuxacademycontent/kubeserve:v1
+        name: app
+
+# Шаг 2. Create a deployment with a record (for rollbacks):
+cloud_user@fas1c:~$ kubectl create -f kubeserve-deployment.yaml --record
+deployment.apps/kubeserve created
+
+# Шаг 3. Check the status of the rollout:
+cloud_user@fas1c:~$ kubectl rollout status deployments kubeserve
+deployment "kubeserve" successfully rolled out
+
+# Шаг 4. View the ReplicaSets in your cluster:
+cloud_user@fas1c:~$ kubectl get replicasets
+NAME                  DESIRED   CURRENT   READY   AGE
+kubeserve-7bf9f4845   3         3         3       98s
+
+cloud_user@fas1c:~$ kubectl get pods
+NAME                        READY   STATUS    RESTARTS   AGE
+kubeserve-7bf9f4845-bs56x   1/1     Running   0          109s
+kubeserve-7bf9f4845-rz88z   1/1     Running   0          109s
+kubeserve-7bf9f4845-z9vk2   1/1     Running   0          109s
+
+
+# Шаг 5. Scale up your deployment by adding more replicas:
+cloud_user@fas1c:~$ kubectl get pods | grep kube
+kubeserve-7bf9f4845-bs56x   1/1     Running   0          2m41s
+kubeserve-7bf9f4845-mvwnj   1/1     Running   0          7s
+kubeserve-7bf9f4845-rz88z   1/1     Running   0          2m41s
+kubeserve-7bf9f4845-v72lb   1/1     Running   0          7s
+kubeserve-7bf9f4845-z9vk2   1/1     Running   0          2m41s
+
+# Шаг 6. Expose the deployment and provide it a service (Создание сервиа через команду - старый способ):
+cloud_user@fas1c:~$ kubectl expose deployment kubeserve --port 80 --target-port 80 --type NodePort
+service/kubeserve exposed
+cloud_user@fas1c:~$ kubectl get services
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+kubernetes   ClusterIP   10.96.0.1        <none>        443/TCP        6d
+kubeserve    NodePort    10.104.244.209   <none>        80:31919/TCP   15s # Создася новый сервис
+nginx        NodePort    10.110.121.194   <none>        80:31087/TCP   5d21h
+
+# Шаг 7. Set the minReadySeconds attribute to your deployment:
+# .spec.minReadySeconds is an optional field that specifies the minimum number of seconds for which a newly created Pod should be ready without any of its containers crashing, for 
+# it to be considered available. This defaults to 0 (the Pod will be considered available as soon as it is ready).
+cloud_user@fas1c:~$ kubectl patch deployment kubeserve -p '{"spec": {"minReadySeconds": 10}}'
+deployment.apps/kubeserve patched
+
+	# Шаг 7.1 Use kubectl apply to update a deployment (обновляем конфигурацию):
+	kubectl apply -f kubeserve-deployment.yaml
+
+	# Шаг 7.2 Use kubectl replace to replace an existing deployment:
+	kubectl replace -f kubeserve-deployment.yaml
+	
+	# Apply - создаст ресурс, если его не было. Replace работает только с тем, что уже есть
+
+# Шаг 10. Run this curl look while the update happens:
+# В отдельном окне открывем curl и смотрим, что сервис отвечает непрерывно
+cloud_user@fas1c:~$ while true; do curl http://10.104.244.209; done
+This is v1 pod kubeserve-7bf9f4845-v72lb
+This is v1 pod kubeserve-7bf9f4845-bs56x
+This is v1 pod kubeserve-7bf9f4845-z9vk2
+This is v1 pod kubeserve-7bf9f4845-z9vk2
+This is v1 pod kubeserve-7bf9f4845-rz88z
+
+# Шаг 11. Perform the rolling update:
+cloud_user@fas1c:~$ kubectl set image deployments/kubeserve app=linuxacademycontent/kubeserve:v2 --v 6 # --v - verbose с глубиной 6
+I0324 10:28:15.590365   14491 loader.go:375] Config loaded from file:  /home/cloud_user/.kube/config
+I0324 10:28:15.599725   14491 round_trippers.go:443] GET https://172.31.110.22:6443/api?timeout=32s 200 OK in 8 milliseconds
+I0324 10:28:15.604818   14491 round_trippers.go:443] GET https://172.31.110.22:6443/apis?timeout=32s 200 OK in 0 milliseconds
+I0324 10:28:15.609220   14491 round_trippers.go:443] GET https://172.31.110.22:6443/apis/autoscaling/v1?timeout=32s 200 OK in 0 milliseconds
+I0324 10:28:15.623503   14491 round_trippers.go:443] GET https://172.31.110.22:6443/apis/certificates.k8s.io/v1beta1?timeout=32s 200 OK in 3 milliseconds
+
+cloud_user@fas1c:~$ while true; do curl http://10.104.244.209; done
+This is v2 pod kubeserve-7bf9f4845-v72lb # В другом окне версия сразу изменилась на v2
+This is v2 pod kubeserve-7bf9f4845-bs56x
+This is v2 pod kubeserve-7bf9f4845-z9vk2
+
+# Шаг 12. Describe a certain ReplicaSet:
+cloud_user@fas1c:~$ kubectl get rs
+NAME                   DESIRED   CURRENT   READY   AGE
+kubeserve-59d99577bd   5         5         5       2m26s # Новая RS c версией image v2
+kubeserve-7bf9f4845    0         0         0       32m # Где версия image была v1
+
+cloud_user@fas1c:~$ kubectl describe replicasets kubeserve-59d99577bd 
+Events:
+  Type    Reason            Age    From                   Message
+  ----    ------            ----   ----                   -------
+  Normal  SuccessfulCreate  4m16s  replicaset-controller  Created pod: kubeserve-59d99577bd-hnh5k # Были созданы новые поды
+  Normal  SuccessfulCreate  4m16s  replicaset-controller  Created pod: kubeserve-59d99577bd-rpv25
+  Normal  SuccessfulCreate  4m16s  replicaset-controller  Created pod: kubeserve-59d99577bd-r655k
+
+cloud_user@fas1c:~$ kubectl get pods # Показывает новые поды, старые поды удалены
+NAME                         READY   STATUS    RESTARTS   AGE
+kubeserve-59d99577bd-7zpjw   1/1     Running   0          5m11s
+kubeserve-59d99577bd-hnh5k   1/1     Running   0          5m26s
+kubeserve-59d99577bd-m78rh   1/1     Running   0          5m11s
+kubeserve-59d99577bd-r655k   1/1     Running   0          5m26s
+kubeserve-59d99577bd-rpv25   1/1     Running   0          5m26s
+
+# Шаг 13. Apply the rolling update to version 3 (buggy):
+# Далее случай, если мы обновились и произошла ошибка
+cloud_user@fas1c:~$ kubectl set image deployment kubeserve app=linuxacademycontent/kubeserve:v3
+deployment.apps/kubeserve image updated
+
+cloud_user@fas1c:~$ while true; do curl http://10.104.244.209; done
+Some internal error has occured! This is pod kubeserve-74dd976c47-tds2s # В другом окне видно, что ошибка
+Some internal error has occured! This is pod kubeserve-74dd976c47-6ghgl
+Some internal error has occured! This is pod kubeserve-74dd976c47-6ghgl
+Some internal error has occured! This is pod kubeserve-74dd976c47-nqdp6
+This is v2 pod kubeserve-59d99577bd-rpv25
+This is v2 pod kubeserve-59d99577bd-rpv25
+
+# Шаг 14. Undo the rollout and roll back to the previous version:
+cloud_user@fas1c:~$ kubectl rollout undo deployments kubeserve
+deployment.apps/kubeserve rolled back
+
+cloud_user@fas1c:~$ while true; do curl http://10.104.244.209; done
+This is v2 pod kubeserve-7bf9f4845-v72lb # В другом окне видно, что произошел откат на v2
+This is v2 pod kubeserve-7bf9f4845-bs56x
+This is v2 pod kubeserve-7bf9f4845-z9vk2
+
+# Шаг 15. Look at the rollout history:
+cloud_user@fas1c:~$ kubectl rollout history deployment kubeserve
+deployment.apps/kubeserve
+REVISION  CHANGE-CAUSE
+1         kubectl create --filename=kubeserve-deployment.yaml --record=true
+3         kubectl create --filename=kubeserve-deployment.yaml --record=true
+4         kubectl create --filename=kubeserve-deployment.yaml --record=true
+
+# Шаг 16. Roll back to a certain revision:
+# Можно откатиться на любубю версию в истории
+cloud_user@fas1c:~$ kubectl rollout undo deployment kubeserve --to-revision=1
+deployment.apps/kubeserve rolled back
+
+cloud_user@fas1c:~$ while true; do curl http://10.104.244.209; done
+This is v1 pod kubeserve-7bf9f4845-r6b9m # В другом окне видно, что произошел откат на на v1
+This is v1 pod kubeserve-7bf9f4845-zd5sd
+This is v1 pod kubeserve-7bf9f4845-r6b9m
+This is v1 pod kubeserve-7bf9f4845-v5k78
+
+# Шаг 17. Pause the rollout in the middle of a rolling update (canary release):
+cloud_user@fas1c:~$ kubectl set image deployments/kubeserve app=linuxacademycontent/kubeserve:v4 --v 6 
+
+cloud_user@fas1c:~$ kubectl rollout pause deployment kubeserve
+deployment.apps/kubeserve paused
+
+cloud_user@fas1c:~$ while true; do curl http://10.104.244.209; done
+This is v4 pod kubeserve-fb476cd58-hhcll
+This is v2 pod kubeserve-59d99577bd-8wtrc
+This is v2 pod kubeserve-59d99577bd-7v4pj
+This is v4 pod kubeserve-fb476cd58-hhcll
+This is v4 pod kubeserve-fb476cd58-wrtlc
+This is v2 pod kubeserve-59d99577bd-qkxw9
+This is v2 pod kubeserve-59d99577bd-qkxw9 # Остались без обновления
+This is v2 pod kubeserve-59d99577bd-8wtrc
+This is v2 pod kubeserve-59d99577bd-8wtrc
+
+# Часть под осталась без обновления
+
+# Шаг 18. Resume the rollout after the rolling update looks good:
+cloud_user@fas1c:~$ kubectl rollout resume deployment kubeserve
+deployment.apps/kubeserve resumed
+# Продолжить обновление после паузы
+
+cloud_user@fas1c:~$ while true; do curl http://10.104.244.209; done
+This is v4 pod kubeserve-fb476cd58-hhcll
+This is v2 pod kubeserve-59d99577bd-8wtrc
+This is v2 pod kubeserve-59d99577bd-7v4pj
+This is v4 pod kubeserve-fb476cd58-hhcll
+This is v4 pod kubeserve-fb476cd58-wrtlc
+This is v4 pod kubeserve-59d99577bd-qkxw9
+This is v4 pod kubeserve-59d99577bd-qkxw9 # Все обновилось
+This is v4 pod kubeserve-59d99577bd-8wtrc
+This is v4 pod kubeserve-59d99577bd-8wtrc
+
+###############
+#Configuring an Application for High Availability and Scale#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/cluster-administration/manage-deployment/#scaling-your-application
+# https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/
+# https://kubernetes.io/docs/concepts/configuration/secret/
+
+	##### Проверка приложения #####
+# Шаг 1. The YAML for a readiness probe:
+cloud_user@fas1c:~$ vim kubeserve-deployment-readiness.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeserve
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kubeserve
+  minReadySeconds: 10
+  strategy: # Стратегия обновления описана в шаблоне деплоймента в разделе strategy
+    rollingUpdate: 
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate # В данном случае используется тип RollingUpdate, когда deployment постепенно уменьшает количество реплик старой версии и увеличивает реплики новой версии, пока они все не заменят старые.
+  template:
+    metadata:
+      name: kubeserve
+      labels:
+        app: kubeserve
+    spec:
+      containers:
+      - image: linuxacademycontent/kubeserve:v3
+        name: app
+        readinessProbe: # readinessProbe проверяет способность приложения начать принимать трафик
+          periodSeconds: 1
+          httpGet: # Метод httpGet проверяет код ответа веб сервера.
+            path: /
+            port: 80
+
+# Шаг 2. Apply the readiness probe:
+cloud_user@fas1c:~$ kubectl apply -f kubeserve-deployment-readiness.yaml
+deployment.apps/kubeserve created
+
+cloud_user@fas1c:~$ kubectl get deployment
+NAME        READY   UP-TO-DATE   AVAILABLE   AGE
+kubeserve   3/3     3            0           6s
+
+# Шаг 3. View the rollout status:
+cloud_user@fas1c:~$ kubectl rollout status deployment kubeserve
+Waiting for deployment "kubeserve" rollout to finish: 0 of 3 updated replicas are available...
+
+# Статус не выдал - проблема
+
+cloud_user@fas1c:~$ kubectl get deploy
+NAME        READY   UP-TO-DATE   AVAILABLE   AGE
+kubeserve   0/3     3            0           4m13s
+
+cloud_user@fas1c:~$ kubectl get pods # Поды не готовы
+NAME                         READY   STATUS    RESTARTS   AGE
+kubeserve-7b46b97759-cf748   0/1     Running   0          4m3s
+kubeserve-7b46b97759-pt77j   0/1     Running   0          4m3s
+kubeserve-7b46b97759-tql7d   0/1     Running   0          4m3s
+
+# Шаг 4. Describe deployment:
+cloud_user@fas1c:~$ kubectl describe deployment kubeserve
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Available      False   MinimumReplicasUnavailable # Не удовлетворяет условию
+  Progressing    True    ReplicaSetUpdated
+  
+# Используем image v3 как в предыдущем уроке, а он с багом - нужно откатиться на v2
+
+cloud_user@fas1c:~$ kubectl rollout status deployment kubeserve
+Waiting for deployment "kubeserve" rollout to finish: 1 out of 3 new replicas have been updated...
+Waiting for deployment "kubeserve" rollout to finish: 1 out of 3 new replicas have been updated...
+Waiting for deployment "kubeserve" rollout to finish: 1 out of 3 new replicas have been updated...
+Waiting for deployment "kubeserve" rollout to finish: 1 out of 3 new replicas have been updated...
+Waiting for deployment "kubeserve" rollout to finish: 1 out of 3 new replicas have been updated...
+Waiting for deployment "kubeserve" rollout to finish: 2 out of 3 new replicas have been updated...
+Waiting for deployment "kubeserve" rollout to finish: 2 out of 3 new replicas have been updated...
+Waiting for deployment "kubeserve" rollout to finish: 2 out of 3 new replicas have been updated...
+Waiting for deployment "kubeserve" rollout to finish: 2 out of 3 new replicas have been updated...
+Waiting for deployment "kubeserve" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "kubeserve" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "kubeserve" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "kubeserve" rollout to finish: 1 old replicas are pending termination...
+deployment "kubeserve" successfully rolled out
+
+	##### Внедрение ConfigMap #####
+# Шаг 5. Create a ConfigMap with two keys:
+cloud_user@fas1c:~$ kubectl create configmap appconfig --from-literal=key1=value1 --from-literal=key2=value2
+configmap/appconfig created
+
+# Шаг 6. Get the YAML back out from the ConfigMap:
+cloud_user@fas1c:~$ kubectl get configmap appconfig -o yaml
+apiVersion: v1
+data:
+  key1: value1
+  key2: value2
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2020-03-25T08:19:47Z"
+  name: appconfig
+  namespace: default
+  resourceVersion: "236260"
+  selfLink: /api/v1/namespaces/default/configmaps/appconfig
+  uid: dd673076-2aef-47a8-8f1f-5ac440858b1a
+
+# Шаг 7. The YAML for the ConfigMap pod ( создаем под для дальнейшей работы с конфиг-мап):
+cloud_user@fas1c:~$ vim configmap-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: configmap-pod
+spec:
+  containers:
+  - name: app-container
+    image: busybox:1.28
+    command: ['sh', '-c', "echo $(MY_VAR) && sleep 3600"] # Выводит переменную окружения
+    env:
+    - name: MY_VAR
+      valueFrom:
+        configMapKeyRef:
+          name: appconfig # Из шага 5
+          key: key1
+
+# Шаг 8. Create the pod that is passing the ConfigMap data:
+cloud_user@fas1c:~$ kubectl apply -f configmap-pod.yaml
+pod/configmap-pod created
+cloud_user@fas1c:~$ kubectl get pod | grep config
+configmap-pod                1/1     Running   0          19s
+
+# Шаг 9. Get the logs from the pod displaying the value:
+cloud_user@fas1c:~$ kubectl logs configmap-pod
+value1
+
+# Шаг 10. The YAML for a pod that has a ConfigMap volume attached:
+cloud_user@fas1c:~$ vim configmap-volume-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: configmap-volume-pod
+spec:
+  containers:
+  - name: app-container
+    image: busybox
+    command: ['sh', '-c', "echo $(MY_VAR) && sleep 3600"]
+    volumeMounts:
+      - name: configmapvolume
+        mountPath: /etc/config
+  volumes:
+    - name: configmapvolume
+      configMap:
+        name: appconfig
+
+# Шаг 11. Create the ConfigMap volume pod:
+cloud_user@fas1c:~$ kubectl apply -f configmap-volume-pod.yaml
+
+# Шаг 12. Get the keys from the volume on the container:
+kubectl exec configmap-volume-pod -- ls /etc/config
+cloud_user@fas1c:~$ kubectl exec configmap-volume-pod -- ls /etc/config
+key1
+key2
+
+# На подключаемом томе создались два файла с параметрами
+
+# Шаг 13. Get the values from the volume on the pod:
+cloud_user@fas1c:~$ kubectl exec configmap-volume-pod -- cat /etc/config/key1
+value1
+
+#  Значения этих параметров можно посомтреть
+
+	##### Внедрение секретов #####
+# Шаг 14. The YAML for a secret:
+value1cloud_user@fas1c:~$ vim appsecret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: appsecret
+stringData:
+  cert: value
+  key: value
+
+# Шаг 15. Create the secret:
+cloud_user@fas1c:~$ kubectl apply -f appsecret.yaml
+secret/appsecret created
+cloud_user@fas1c:~$ kubectl get secret
+NAME                  TYPE                                  DATA   AGE
+appsecret             Opaque                                2      12s
+default-token-qhqkw   kubernetes.io/service-account-token   3      6d23h
+
+
+# Шаг 16. The YAML for a pod that will use the secret:
+cloud_user@fas1c:~$ vim secret-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secret-pod
+spec:
+  containers:
+  - name: app-container
+    image: busybox
+    command: ['sh', '-c', "echo Hello, Kubernetes! && sleep 3600"]
+    env:
+    - name: MY_CERT
+      valueFrom:
+        secretKeyRef:
+          name: appsecret
+          key: cert
+
+# Шаг 17. Create the pod that has attached secret data:
+cloud_user@fas1c:~$ kubectl apply -f secret-pod.yaml
+pod/secret-pod created
+
+# Шаг 18. Open a shell and echo the environment variable:
+cloud_user@fas1c:~$ kubectl exec -it secret-pod -- sh
+/ # echo $MY_CERT
+value
+
+# В случае с переменной окружения секрет выводит значение ключа
+
+# Шаг 19. The YAML for a pod that will access the secret from a volume:
+cloud_user@fas1c:~$ vim secret-volume-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secret-volume-pod
+spec:
+  containers:
+  - name: app-container
+    image: busybox
+    command: ['sh', '-c', "echo $(MY_VAR) && sleep 3600"]
+    volumeMounts:
+      - name: secretvolume
+        mountPath: /etc/certs
+  volumes:
+    - name: secretvolume
+      secret:
+        secretName: appsecret
+
+# Шаг 20. Create the pod with volume attached with secrets:
+cloud_user@fas1c:~$ kubectl apply -f secret-volume-pod.yaml
+pod/secret-volume-pod created
+
+# Шаг 21. Get the keys from the volume mounted to the container with the secrets:
+cloud_user@fas1c:~$ kubectl exec secret-volume-pod -- ls /etc/certs
+cert
+key
+
+cloud_user@fas1c:~$ kubectl exec secret-volume-pod -- cat /etc/certs/key
+value
+
+# Выводит значения секретов
+
+# Секреты можно кодировать перед тем как создавать файл с описанием секрета:
+echo -n 'admin' | base64
+YWRtaW4=
+echo -n 'B7wItYlHeRR1' | base64
+Qjd3SXRZbEhlUlIx
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysecret
+type: Opaque
+data:
+  username: YWRtaW4=
+  password: Qjd3SXRZbEhlUlIx
+  
+# После запуска пода в контейнере с именем mycontainer проверим переменные окружения:
+
+echo $SECRET_USERNAME
+admin
+echo $SECRET_PASSWORD
+B7wItYlHeRR1
+
+###############
+#Creating a Self-Healing Application#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/
+# https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/
+
+ ##### Внедрение ReplicaSet #####
+# Шаг 1. The YAML for a ReplicaSet:
+cloud_user@fas1c:~$ vim replicaset.yaml
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: myreplicaset
+  labels:
+    app: app
+    tier: frontend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      tier: frontend
+  template:
+    metadata:
+      labels:
+        tier: frontend
+    spec:
+      containers:
+      - name: main
+        image: linuxacademycontent/kubeserve
+
+# Шаг 2. Create the ReplicaSet:
+cloud_user@fas1c:~$ kubectl apply -f replicaset.yaml
+replicaset.apps/myreplicaset created
+
+cloud_user@fas1c:~$ kubectl get rs
+NAME                   DESIRED   CURRENT   READY   AGE
+myreplicaset           3         3         3       12s
+
+cloud_user@fas1c:~$ kubectl get pods
+NAME                         READY   STATUS    RESTARTS   AGE
+myreplicaset-2qlmj           1/1     Running   0          24s
+myreplicaset-bjl75           1/1     Running   0          24s
+myreplicaset-vmcqk           1/1     Running   0          24s
+
+# Шаг 3. The YAML for a pod with the same label as a ReplicaSet:
+cloud_user@fas1c:~$ vim pod-replica.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod1
+  labels:
+    tier: frontend
+spec:
+  containers:
+  - name: main
+    image: linuxacademycontent/kubeserve
+
+# Шаг 4. Create the pod with the same label:
+cloud_user@fas1c:~$ kubectl apply -f pod-replica.yaml
+pod/pod1 created
+
+cloud_user@fas1c:~$ kubectl get rs
+NAME                   DESIRED   CURRENT   READY   AGE
+myreplicaset           3         3         3       2m4s
+
+cloud_user@fas1c:~$ kubectl get pods -o wide
+NAME                         READY   STATUS    RESTARTS   AGE     IP            NODE                           NOMINATED NODE   READINESS GATES
+myreplicaset-2qlmj           1/1     Running   0          2m16s   10.244.2.66   fas3c.mylabserver.com   <none>           <none>
+myreplicaset-bjl75           1/1     Running   0          2m16s   10.244.1.65   fas2c.mylabserver.com   <none>           <none>
+myreplicaset-vmcqk           1/1     Running   0          2m16s   10.244.1.66   fas2c.mylabserver.com   <none>           <none>
+
+# Шаг 5. Watch the pod get terminated:
+cloud_user@fas1c:~$ kubectl get pods -o wide
+
+# pod1 стал terminated, потому что он попадает под условия RS, а там уже задано и существует 3 копии
+
+ ##### Внедрение StatefulSet #####
+# Шаг 6. The YAML for a StatefulSet:
+cloud_user@fas1c:~$ vim statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  serviceName: "nginx"
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+          name: web
+        volumeMounts:
+        - name: www
+          mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:
+  - metadata:
+      name: www
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
+
+# Шаг 7. Create the StatefulSet:
+cloud_user@fas1c:~$ kubectl apply -f statefulset.yaml
+statefulset.apps/web created
+
+# Шаг 8. View all StatefulSets in the cluster:
+cloud_user@fas1c:~$ kubectl get statefulset
+NAME   READY   AGE
+web    0/2     10s
+
+# Шаг 9. Describe the StatefulSets:
+cloud_user@fas1c:~$ kubectl describe statefulsets
+Name:               web
+Namespace:          default
+CreationTimestamp:  Wed, 25 Mar 2020 09:32:25 +0000
+Selector:           app=nginx
+Labels:             <none>
+Annotations:        kubectl.kubernetes.io/last-applied-configuration:
+                      {"apiVersion":"apps/v1","kind":"StatefulSet","metadata":{"annotations":{},"name":"web","namespace":"default"},"spec":{"replicas":2,"select...
+Replicas:           2 desired | 1 total
+Update Strategy:    RollingUpdate
+  Partition:        824643510732
+Pods Status:        0 Running / 1 Waiting / 0 Succeeded / 0 Failed
+Pod Template:
+  Labels:  app=nginx
+  Containers:
+   nginx:
+    Image:        nginx
+    Port:         80/TCP
+    Host Port:    0/TCP
+    Environment:  <none>
+    Mounts:
+      /usr/share/nginx/html from www (rw)
+  Volumes:  <none>
+Volume Claims:
+  Name:          www
+  StorageClass:
+  Labels:        <none>
+  Annotations:   <none>
+  Capacity:      1Gi
+  Access Modes:  [ReadWriteOnce]
+Events:
+  Type    Reason            Age   From                    Message
+  ----    ------            ----  ----                    -------
+  Normal  SuccessfulCreate  57s   statefulset-controller  create Claim www-web-0 Pod web-0 in StatefulSet web success
+  Normal  SuccessfulCreate  57s   statefulset-controller  create Pod web-0 in StatefulSet web successful

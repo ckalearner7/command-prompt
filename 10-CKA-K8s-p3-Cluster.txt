@@ -1,0 +1,321 @@
+						Managing the Kubernetes Cluster
+###############
+#Upgrading the Kubernetes Cluster#
+###############
+# Материалы: https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-upgrade/
+# Задача: upgrading our cluster from version 1.15.9 to 1.16.6.
+
+# Шаг 0. Get version of Nodes:
+cloud_user@fas1c:~$ kubectl get nodes
+NAME                           STATUS   ROLES    AGE   VERSION
+fas1c.mylabserver.com   Ready    master   21h   v1.15.7
+fas2c.mylabserver.com   Ready    <none>   21h   v1.15.7
+fas3c.mylabserver.com   Ready    <none>   21h   v1.15.7
+
+	##### ONLY MASTER #####
+# Шаг 1. Get the version of the API server:
+cloud_user@fas1c:~$ kubectl version --short
+Client Version: v1.15.7 # kubectl
+Server Version: v1.15.11 # API server
+
+# Шаг 2. View the version of kubelet:
+cloud_user@fas1c:~$ kubectl describe nodes | grep Version
+ Kernel Version:             4.15.0-1063-aws
+ Container Runtime Version:  docker://18.6.1
+ Kubelet Version:            v1.15.7
+ Kube-Proxy Version:         v1.15.7
+
+# Шаг 3. View the version of controller-manager pod:
+cloud_user@fas1c:~$ kubectl get pods -n kube-system
+NAME                                                   READY   STATUS    RESTARTS   AGE
+coredns-5d4dd4b4db-p6dpw                               1/1     Running   1          21h
+coredns-5d4dd4b4db-w6t4m                               1/1     Running   1          21h
+etcd-fas1c.mylabserver.com                      1/1     Running   1          21h
+kube-apiserver-fas1c.mylabserver.com            1/1     Running   1          21h
+kube-controller-manager-fas1c.mylabserver.com   1/1     Running   1          21h
+kube-flannel-ds-amd64-5ttr7                            1/1     Running   2          21h
+kube-flannel-ds-amd64-cjzgs                            1/1     Running   1          21h
+kube-flannel-ds-amd64-n9q98                            1/1     Running   2          21h
+kube-proxy-dh4m7                                       1/1     Running   1          21h
+kube-proxy-vh28q                                       1/1     Running   1          21h
+kube-proxy-zclcw                                       1/1     Running   1          21h
+kube-scheduler-fas1c.mylabserver.com            1/1     Running   1          21h
+
+cloud_user@fas1c:~$ kubectl get pods kube-controller-manager-fas1c.mylabserver.com -o yaml -n kube-system | grep image
+    image: k8s.gcr.io/kube-controller-manager:v1.15.11 # Нужна эта версия
+    imagePullPolicy: IfNotPresent
+    image: k8s.gcr.io/kube-controller-manager:v1.15.11
+    imageID: docker-pullable://k8s.gcr.io/kube-controller-manager@sha256:03cb7608c0d078eaa086bed3debfb8136e624a0b3f8b7837090da63ba39607b6
+
+# Шаг 4. Release the hold on versions of kubeadm and kubelet:
+cloud_user@fas1c:~$ sudo apt-mark unhold kubeadm kubelet
+[sudo] password for cloud_user:
+Canceled hold on kubeadm.
+Canceled hold on kubelet.
+
+# Шаг 5. Install version 1.16.6 of kubeadm:
+cloud_user@fas1c:~$ sudo apt install -y kubeadm=1.16.6-00
+
+# Шаг 6. Hold the version of kubeadm at 1.16.6:
+cloud_user@fas1c:~$ sudo apt-mark hold kubeadm
+kubeadm set on hold.
+
+# Шаг 7. Verify the version of kubeadm:
+cloud_user@fas1c:~$ kubeadm version
+kubeadm version: &version.Info{Major:"1", Minor:"16", GitVersion:"v1.16.6", GitCommit:"72c30166b2105cd7d3350f2c28a219e6abcd79eb", GitTreeState:"clean", BuildDate:"2020-01-18T23:29:13Z", GoVersion:"go1.13.5", Compiler:"gc", Platform:"linux/amd64"}
+
+# Шаг 8. Plan the upgrade of all the controller components:
+cloud_user@fas1c:~$ sudo kubeadm upgrade plan
+Components that must be upgraded manually after you have upgraded the control plane with 'kubeadm upgrade apply': # Важно
+COMPONENT   CURRENT       AVAILABLE
+Kubelet     3 x v1.15.7   v1.16.8
+
+Upgrade to the latest stable version:
+
+COMPONENT            CURRENT    AVAILABLE
+API Server           v1.15.11   v1.16.8
+Controller Manager   v1.15.11   v1.16.8
+Scheduler            v1.15.11   v1.16.8
+Kube Proxy           v1.15.11   v1.16.8
+CoreDNS              1.3.1      1.6.2
+Etcd                 3.3.10     3.3.15-0
+
+You can now apply the upgrade by executing the following command:
+
+        kubeadm upgrade apply v1.16.8
+
+Note: Before you can perform this upgrade, you have to update kubeadm to v1.16.8.
+
+# Шаг 9. Upgrade the controller components (обновить компоненты, kubelet на мастере в том числе):
+cloud_user@fas1c:~$ sudo kubeadm upgrade apply v1.16.6 # До v1.16.8 не получилось ак как на шаге 5 выполнили установку 1.16.6
+
+# Шаг 10. Release the hold on the version of kubectl:
+cloud_user@fas1c:~$ sudo apt-mark unhold kubectl
+Canceled hold on kubectl.
+
+# Шаг 11. Upgrade kubectl:
+cloud_user@fas1c:~$ sudo apt install -y kubectl=1.16.6-00
+
+# Шаг 12. Hold the version of kubectl and kubelet at 1.16.6:
+cloud_user@fas1c:~$ sudo apt-mark hold kubectl kubelet
+kubectl set on hold.
+
+# Шаг 13. Проверка на мастере
+cloud_user@fas1c:~$ kubectl get nodes
+NAME                           STATUS   ROLES    AGE   VERSION
+fas1c.mylabserver.com   Ready    master   21h   v1.16.6
+fas2c.mylabserver.com   Ready    <none>   21h   v1.15.7
+fas3c.mylabserver.com   Ready    <none>   21h   v1.15.7
+
+cloud_user@fas1c:~$ kubectl version --short
+Client Version: v1.16.6
+Server Version: v1.16.6
+
+	##### ALL WORKER NODES #####
+# Шаг 14. Release the hold on the version of kubelet:
+cloud_user@fas2c:~$ sudo apt-mark unhold kubelet
+[sudo] password for cloud_user:
+Canceled hold on kubelet.
+
+# Шаг 15. Upgrade the version of kubelet:
+cloud_user@fas2c:~$ sudo apt install -y kubelet=1.16.6-00
+
+# Шаг 16. Hold the version of kubelet at 1.16.6:
+cloud_user@fas2c:~$ sudo apt-mark hold kubelet
+kubelet set on hold.
+
+# Шаг 17. Проверка на нодах
+cloud_user@fas1c:~$ kubectl get nodes
+NAME                           STATUS   ROLES    AGE   VERSION
+fas1c.mylabserver.com   Ready    master   21h   v1.16.6
+fas2c.mylabserver.com   Ready    <none>   21h   v1.16.6
+fas3c.mylabserver.com   Ready    <none>   21h   v1.16.6
+
+###############
+#Operating System Upgrades within a Kubernetes Cluster#
+###############
+# Материалы: https://kubernetes.io/docs/tasks/administer-cluster/cluster-management/#maintenance-on-a-node
+
+	##### Случай 1. Нода пропадает на короткое время для обслуживания #####
+# Шаг 1. See which pods are running on which nodes:
+cloud_user@fas1c:~$ kubectl get pods -o wide
+NAME                     READY   STATUS    RESTARTS   AGE   IP           NODE                           NOMINATED NODE   READINESS GATES
+nginx-7bb7cd8db5-ct54k   1/1     Running   2          22h   10.244.1.5   fas2c.mylabserver.com   <none>           <none>
+
+# Шаг 2. Evict the pods on a node:
+cloud_user@fas1c:~$ kubectl drain fas2c.mylabserver.com --ignore-daemonsets
+WARNING: ignoring DaemonSet-managed Pods: kube-system/kube-flannel-ds-amd64-5ttr7, kube-system/kube-proxy-wm2xs
+evicting pod "coredns-5644d7b6d9-5vnml"
+evicting pod "nginx-7bb7cd8db5-ct54k"
+pod/nginx-7bb7cd8db5-ct54k evicted
+pod/coredns-5644d7b6d9-5vnml evicted
+node/fas2c.mylabserver.com evicted
+
+# Шаг 3. Watch as the node changes status:
+cloud_user@fas1c:~$ kubectl get nodes
+NAME                           STATUS                     ROLES    AGE   VERSION
+fas1c.mylabserver.com   Ready                      master   25h   v1.16.6
+fas2c.mylabserver.com   Ready,SchedulingDisabled   <none>   25h   v1.16.6 # расписание выключено, значит тут не будет подов
+fas3c.mylabserver.com   Ready                      <none>   25h   v1.16.6
+
+cloud_user@fas1c:~$ kubectl get pods -o wide
+NAME                     READY   STATUS    RESTARTS   AGE     IP           NODE                           NOMINATED NODE   READINESS GATES
+nginx-7bb7cd8db5-2cbp2   1/1     Running   0          2m49s   10.244.2.5   fas3c.mylabserver.com   <none>           <none> # Изменил ноду
+
+# Шаг 4. Schedule pods to the node after maintenance is complete:
+cloud_user@fas1c:~$ kubectl uncordon fas2c.mylabserver.com # Возвращаем ноду
+node/fas2c.mylabserver.com uncordoned
+
+# Теперь нода снова будет в состоянии Ready
+
+	##### Случай 2. Нода была удалена из кластера #####
+# Шаг 1. Evict the pods on a node:
+cloud_user@fas1c:~$ kubectl drain fas2c.mylabserver.com --ignore-daemonsets
+
+# Шаг 2. Remove a node from the cluster:
+cloud_user@fas1c:~$ kubectl delete node fas2c.mylabserver.com
+node "fas2c.mylabserver.com" deleted
+
+cloud_user@fas1c:~$ kubectl get nodes
+NAME                           STATUS   ROLES    AGE   VERSION
+fas1c.mylabserver.com   Ready    master   25h   v1.16.6
+fas3c.mylabserver.com   Ready    <none>   25h   v1.16.6
+
+# Шаг 3. Generate a new token (делаем на мастере):
+cloud_user@fas1c:~$ sudo kubeadm token generate
+[sudo] password for cloud_user:
+cs1mrt.ighu029gguvc2kjd
+
+cloud_user@fas1c:~$ sudo kubeadm token list
+TOKEN                     TTL       EXPIRES                USAGES                   DESCRIPTION   EXTRA GROUPS
+cs1mrt.ighu029gguvc2kjd   1h        2020-03-19T12:43:57Z   authentication,signing   <none>        system:bootstrappers:kubeadm:default-node-token
+
+
+# Шаг 4. Print the kubeadm join command to join a node to the cluster (делаем на мастере):
+cloud_user@fas1c:~$ sudo kubeadm token create cs1mrt.ighu029gguvc2kjd --ttl 2h --print-join-command
+kubeadm join 172.31.110.22:6443 --token cs1mrt.ighu029gguvc2kjd --discovery-token-ca-cert-hash sha256:9de6cd7187bb3b930768971e0a7c337a9a6e0126c9bfa25c5ed72a0a950885f6
+
+# Шаг 5. Установить все необходимое на новый сервер
+# !!! Как это сделать на ноде, которая уже была в кластере?
+
+# Шаг 6. Выполнить join из шага 4 на новом сервере:
+cloud_user@fas2c:~$ sudo kubeadm join 172.31.110.22:6443 --token cs1mrt.ighu029gguvc2kjd --discovery-token-ca-cert-hash sha256:9de6cd7187bb3b930768971e0a7c337a9a6e0126c9bfa25c5ed72a0a950885f6
+
+# Шаг 7. Все обновить, как в кластере
+
+# Шаг 8. Проверка
+cloud_user@fas1c:~$ kubectl get nodes
+NAME                           STATUS   ROLES    AGE     VERSION
+fas1c.mylabserver.com   Ready    master   25h     v1.16.6
+fas2c.mylabserver.com   Ready    <none>   2m38s   v1.16.6
+fas3c.mylabserver.com   Ready    <none>   25h     v1.16.6
+
+###############
+#Backing Up and Restoring a Kubernetes Cluster#
+###############
+
+# The etcdctl utility allows to easily create a snapshot of our cluster state (etcd) and save this to an external location. 
+# https://kubernetes.io/docs/tasks/administer-cluster/configure-upgrade-etcd/#backing-up-an-etcd-cluster
+# https://github.com/etcd-io/etcd/blob/master/Documentation/op-guide/recovery.md
+
+# Шаг 1. Get the etcd binaries:
+cloud_user@fas1c:~$ wget https://github.com/etcd-io/etcd/releases/download/v3.3.12/etcd-v3.3.12-linux-amd64.tar.gz
+
+cloud_user@fas1c:~$ ls
+Desktop    Downloads  Pictures  Templates  etcd-v3.3.12-linux-amd64.tar.gz
+Documents  Music      Public    Videos
+
+# Шаг 2. Unzip the compressed binaries:
+cloud_user@fas1c:~$ tar xvf etcd-v3.3.12-linux-amd64.tar.gz
+
+# Шаг 3. Move the files into /usr/local/bin:
+cloud_user@fas1c:~$ sudo mv etcd-v3.3.12-linux-amd64/etcd* /usr/local/bin
+
+# Шаг 4. Take a snapshot of the etcd datastore using etcdctl:
+cloud_user@fas1c:~$ sudo ETCDCTL_API=3 etcdctl snapshot save snapshot.db --cacert /etc/kubernetes/pki/etcd/server.crt --cert /etc/kubernetes/pki/etcd/ca.crt --key /etc/kubernetes/pki/etcd/ca.key
+Snapshot saved at snapshot.db
+
+cloud_user@fas1c:~$ ls | grep snap
+snapshot.db
+
+# Шаг 5. View the help page for etcdctl:
+cloud_user@fas1c:~$ ETCDCTL_API=3 etcdctl --help
+
+# Шаг 6. Browse to the folder that contains the certificate files:
+cloud_user@fas1c:/etc/kubernetes/pki/etcd$ ll
+total 40
+drwxr-xr-x 2 root root 4096 Mar 18 09:17 ./
+drwxr-xr-x 3 root root 4096 Mar 18 09:17 ../
+-rw-r--r-- 1 root root 1017 Mar 18 09:17 ca.crt
+-rw------- 1 root root 1679 Mar 18 09:17 ca.key
+-rw-r--r-- 1 root root 1094 Mar 19 06:41 healthcheck-client.crt
+-rw------- 1 root root 1679 Mar 19 06:41 healthcheck-client.key
+-rw-r--r-- 1 root root 1188 Mar 19 06:41 peer.crt
+-rw------- 1 root root 1679 Mar 19 06:41 peer.key
+-rw-r--r-- 1 root root 1188 Mar 19 06:41 server.crt
+-rw------- 1 root root 1679 Mar 19 06:41 server.key
+
+
+# Шаг 7. View that the snapshot was successful:
+cloud_user@fas1c:~$ ETCDCTL_API=3 etcdctl --write-out=table snapshot status snapshot.db
++----------+----------+------------+------------+
+|   HASH   | REVISION | TOTAL KEYS | TOTAL SIZE |
++----------+----------+------------+------------+
+| 18468c98 |    73727 |        957 |     3.3 MB |
++----------+----------+------------+------------+
+
+
+# Шаг 8. Zip up the contents of the etcd directory:
+cloud_user@fas1c:~$ sudo tar -zcvf etcd.tar.gz /etc/kubernetes/pki/etcd
+[sudo] password for cloud_user:
+tar: Removing leading `/' from member names
+/etc/kubernetes/pki/etcd/
+/etc/kubernetes/pki/etcd/server.key
+/etc/kubernetes/pki/etcd/healthcheck-client.crt
+/etc/kubernetes/pki/etcd/ca.crt
+/etc/kubernetes/pki/etcd/server.crt
+/etc/kubernetes/pki/etcd/peer.crt
+/etc/kubernetes/pki/etcd/peer.key
+/etc/kubernetes/pki/etcd/healthcheck-client.key
+/etc/kubernetes/pki/etcd/ca.key
+
+# Шаг 9. Copy the etcd directory to another server:
+scp etcd.tar.gz cloud_user@18.219.235.42:~/
+
+# Далее, чтобы восстановить кластер нужно воспользоваться той же утилитой (смотреть в справку -h)
+# Также важно, чтобы IP-адреса новых нод были те же
+
+###############
+#Lab 1. Upgrading the Kubernetes Cluster Using kubeadm#
+###############
+# We must perform the upgrade to all of the cluster components, including kube-controller-manager, kube-scheduler, kubeadm, and kubectl.
+
+# Шаг 1. Install Version 1.16.6 of kubeadm on Master Node
+	# Шаг 1.1. Unhold the version of kubeadm
+	sudo apt-mark unhold kubeadm
+	# Шаг 1.2. Install version 1.16.6 of kubeadm
+	sudo apt install -y kubeadm=1.16.6-00
+
+# Шаг 2. Upgrade Control Plane Components using kubeadm
+	# Шаг 2.1. Plan the upgrade
+	sudo kubeadm upgrade plan
+	# Шаг 2.2. Apply the upgrade
+	sudo kubeadm upgrade apply v1.16.6
+
+# Шаг 3. Install Version 1.16.6 of kubelet on Master Node
+	# Шаг 3.1. Unhold the version of kubelet
+	sudo apt-mark unhold kubelet
+	# Шаг 3.2. Install version 1.16.6 of kubelet
+	sudo apt install -y kubelet=1.16.6-00
+
+# Шаг 4. Install Version 1.16.6 of kubectl on Master Node
+	# Шаг 4.1. Unhold the version of kubectl
+	sudo apt-mark unhold kubectl
+	# Шаг 4.2. Install version 1.16.6 of kubelet
+	sudo apt install -y kubectl=1.16.6-00
+
+# Шаг 5. Install Version 1.16.6 of kubelet on The Worker Nodes
+	# Шаг 5.1. Unhold the version of kubelet
+	sudo apt-mark unhold kubelet
+	# Шаг 5.2. Install version 1.16.6 of kubelet
+	sudo apt install -y kubelet=1.16.6-00

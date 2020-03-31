@@ -1,0 +1,1229 @@
+						Securing the Kubernetes Cluster
+###############
+#Kubernetes Security Primitives#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/cluster-administration/cluster-administration-overview/#securing-a-cluster
+# https://kubernetes.io/docs/reference/access-authn-authz/authentication/
+# https://kubernetes.io/docs/reference/kubectl/overview/
+
+We will create a workstation for you to administer your cluster without logging in to the Kubernetes master server.
+
+##### Пример 1. Создание serviceaccount ля Jenkins #####
+# Шаг 1. List the service accounts in your cluster:
+cloud_user@fas1c:~$ kubectl get serviceaccounts
+NAME      SECRETS   AGE
+default   1         9d
+
+# Одной из сложностей, с которой сталкиваются многие пользователи Kubernetes в контексте субъектов, является различие между обычными пользователями и ServiceAccounts. В теории всё просто:
+# Users — глобальные пользователи, предназначены для людей или процессов, живущих вне кластера;
+# ServiceAccounts — ограниченные пространством имён и предназначенные для процессов внутри кластера, запущенных на подах.
+
+# Шаг 2. Create a new jenkins service account:
+cloud_user@fas1c:~$ kubectl create serviceaccount jenkins
+serviceaccount/jenkins created
+
+# Шаг 3. Use the abbreviated version of serviceAccount:
+cloud_user@fas1c:~$ kubectl get sa
+NAME      SECRETS   AGE
+default   1         9d
+jenkins   1         8s
+
+# Шаг 4. View the YAML for our service account:
+cloud_user@fas1c:~$ kubectl get serviceaccounts jenkins -o yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  creationTimestamp: "2020-03-27T09:35:07Z"
+  name: jenkins
+  namespace: default
+  resourceVersion: "324267"
+  selfLink: /api/v1/namespaces/default/serviceaccounts/jenkins
+  uid: a529c370-9d80-4c15-a13a-ca4be141abaf
+secrets:
+- name: jenkins-token-q7sf8 # Привязан секрет
+
+# Шаг 5. View the secrets in your cluster:
+cloud_user@fas1c:~$ kubectl get secret jenkins-token-q7sf8
+NAME                  TYPE                                  DATA   AGE
+jenkins-token-q7sf8   kubernetes.io/service-account-token   3      2m35s
+
+# Шаг 6. The YAML for a busybox pod using the jenkins service account:
+cloud_user@fas1c:~$ vim busybox.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox
+  namespace: default
+spec:
+  serviceAccountName: jenkins # Привязываем к ServiceAccount`у
+  containers:
+  - image: busybox:1.28.4
+    command:
+      - sleep
+      - "3600"
+    imagePullPolicy: IfNotPresent
+    name: busybox
+  restartPolicy: Always
+
+# Шаг 7. Create a new pod with the service account:
+cloud_user@fas1c:~$ kubectl apply -f busybox.yaml
+pod/busybox created
+
+cloud_user@fas1c:~$ kubectl get pods
+NAME                         READY   STATUS    RESTARTS   AGE
+busybox                      1/1     Running   0          15s
+
+# Теперь Jenkins может подключаться к подам K8s используя специальный плагин
+
+##### Пример 2. Подключение к кластеру с удаленного хоста #####
+# Шаг 8. View the cluster config that kubectl uses:
+# Параметры конфига, который использует kubectl
+cloud_user@fas1c:~$ kubectl config view
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: DATA+OMITTED
+    server: https://172.31.110.22:6443
+  name: kubernetes
+contexts:
+- context:
+    cluster: kubernetes
+    user: kubernetes-admin
+  name: kubernetes-admin@kubernetes
+current-context: kubernetes-admin@kubernetes
+kind: Config
+preferences: {}
+users:
+- name: kubernetes-admin
+  user:
+    client-certificate-data: REDACTED
+    client-key-data: REDACTED
+
+
+# Шаг 9. View the config file:
+cloud_user@fas1c:~$ cat ~/.kube/config
+
+# Та же информация  + сертификат клиента
+
+# Шаг 10. Set new credentials for your cluster:
+cloud_user@fas1c:~$ kubectl config set-credentials chad --username=chad --password=password
+
+# Шаг 11. Create a role binding for anonymous users (not recommended):
+cloud_user@fas1c:~$ kubectl create clusterrolebinding cluster-system-anonymous --clusterrole=cluster-admin --user=system:anonymous
+
+# Roles соединяют ресурсы и глаголы. Если вы хотите применить роль ко всему кластеру, есть аналогичный объект ClusterRoles.
+
+# Шаг 12. SCP the certificate authority to your workstation or server:
+cloud_user@fas1c:~$ cd /etc/kubernetes/
+cloud_user@fas1c:~$ cd pki
+cloud_user@fas1c:~$ scp ca.crt cloud_user@[pub-ip-of-remote-server]:~/ # Копируем на отдельный сервер, где будет kubectl
+
+# Шаг 13. Set the cluster address and authentication:
+# !!!!!Предварительно установить из репозитория kubectl
+# Остальную информацию о кластере можно взять из config view (Шаг 8), а сертификат мы скопировали
+cloud_user@remote-server:~$ kubectl config set-cluster kubernetes --server=https://172.31.41.61:6443 --certificate-authority=ca.crt --embed-certs=true 
+
+# Шаг 14. Set the credentials for Chad:
+cloud_user@remote-server:~$ kubectl config set-credentials chad --username=chad --password=password
+
+# Шаг 15. Set the context for the cluster:
+cloud_user@remote-server:~$ kubectl config set-context kubernetes --cluster=kubernetes --user=chad --namespace=default
+
+# Шаг 16. Use the context:
+cloud_user@remote-server:~$ kubectl config use-context kubernetes
+
+# Шаг 17. Run the same commands with kubectl:
+cloud_user@remote-server:~$ kubectl get nodes
+
+###############
+#Cluster Authentication and Authorization#
+###############
+# Материалы:
+# https://kubernetes.io/docs/reference/access-authn-authz/authorization/
+# https://kubernetes.io/docs/reference/access-authn-authz/rbac/
+# https://kubernetes.io/docs/reference/access-authn-authz/rbac/#rolebinding-and-clusterrolebinding
+
+##### Пример 1. Показать список services #####
+# Шаг 1. Create a new namespace:
+cloud_user@fas1c:~$ kubectl create ns web
+namespace/web created
+
+cloud_user@fas1c:~$ kubectl get ns
+NAME              STATUS   AGE
+default           Active   9d
+kube-node-lease   Active   9d
+kube-public       Active   9d
+kube-system       Active   9d
+my-ns             Active   9d
+web               Active   9s
+
+# Шаг 2. The YAML for a service role:
+cloud_user@fas1c:~$ vim role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: web
+  name: service-reader
+rules:
+- apiGroups: [""]
+  verbs: ["get", "list"]
+  resources: ["services"] # Субъект - service
+
+# Шаг 3. Create a new role from that YAML file:
+cloud_user@fas1c:~$ kubectl apply -f role.yaml
+role.rbac.authorization.k8s.io/service-reader created
+
+cloud_user@fas1c:~$ kubectl get roles -n web
+NAME             AGE
+service-reader   20s
+
+# Шаг 4. Create a RoleBinding:
+cloud_user@fas1c:~$ kubectl get sa -n web # Изначально ServiceAccount не существует
+NAME      SECRETS   AGE
+default   1         3m6s
+
+cloud_user@fas1c:~$ kubectl create rolebinding test --role=service-reader --serviceaccount=web:default -n web
+rolebinding.rbac.authorization.k8s.io/test created
+
+cloud_user@fas1c:~$ kubectl get sa -n web # Потом ServiceAccount тоже не создался
+NAME      SECRETS   AGE
+default   1         4m37s
+
+# Шаг 5. Run a proxy for inter-cluster communications:
+# Запустить прокси в отдельном окне на мастере
+cloud_user@fas1c:~$ kubectl proxy
+Starting to serve on 127.0.0.1:8001
+
+# Шаг 6. Try to access the services in the web namespace:
+cloud_user@fas1c:~$ curl localhost:8001/api/v1/namespaces/web/services
+{
+  "kind": "ServiceList",
+  "apiVersion": "v1",
+  "metadata": {
+    "selfLink": "/api/v1/namespaces/web/services",
+    "resourceVersion": "333768"
+  },
+  "items": []
+}
+
+# В итоге ServiceAccount web:default пожет посмотреть список сервисов
+
+##### Пример 2. Показать список PV #####
+# Шаг 7. Create a ClusterRole to access PersistentVolumes:
+cloud_user@fas1c:~$ kubectl create clusterrole pv-reader --verb=get,list --resource=persistentvolumes
+clusterrole.rbac.authorization.k8s.io/pv-reader created
+
+# Шаг 8. Create a ClusterRoleBinding for the cluster role:
+cloud_user@fas1c:~$ kubectl create clusterrolebinding pv-test --clusterrole=pv-reader --serviceaccount=web:default
+clusterrolebinding.rbac.authorization.k8s.io/pv-test created
+
+# Шаг 9. The YAML for a pod that includes a curl and proxy container:
+cloud_user@fas1c:~$ vim curl-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: curlpod
+  namespace: web
+spec:
+  containers:
+  - image: tutum/curl
+    command: ["sleep", "9999999"]
+    name: main
+  - image: linuxacademycontent/kubectl-proxy
+    name: proxy
+  restartPolicy: Always
+
+# Шаг 10. Create the pod that will allow you to curl directly from the container:
+cloud_user@fas1c:~$ kubectl apply -f curl-pod.yaml
+pod/curlpod created
+
+# Шаг 11. Get the pods in the web namespace:
+cloud_user@fas1c:~$ kubectl get pods -n web
+NAME      READY   STATUS    RESTARTS   AGE
+curlpod   2/2     Running   0          4m10s
+
+# Шаг 12. Open a shell to the container:
+cloud_user@fas1c:~$ kubectl exec -it curlpod -n web -- sh
+Defaulting container name to main.
+Use 'kubectl describe pod/curlpod -n web' to see all of the containers in this pod.
+#
+
+# Шаг 13. Access PersistentVolumes (cluster-level) from the pod:
+# curl localhost:8001/api/v1/persistentvolumes
+{
+  "kind": "PersistentVolumeList",
+  "apiVersion": "v1",
+  "metadata": {
+    "selfLink": "/api/v1/persistentvolumes",
+    "resourceVersion": "334850"
+  },
+  "items": []
+}#
+
+# Мы пожем получить информацию о PV из контейнера, так как ServiceAccount web:default имеет ClusterRoleBinding и ClusterRole, то есть разрешения на уровне кластера
+
+###############
+#Configuring Network Policies#
+###############
+# Network policies allow you to specify which pods can talk to other pods. 
+# First of all, Canal was the name for a project that sought to integrate the networking layer provided by flannel with the networking policy capabilities of Calico.
+# In general, Canal is a good choice if you like the networking model that Flannel provides but find some of Calico’s features enticing.
+
+# Материалы:
+# https://kubernetes.io/docs/concepts/services-networking/network-policies/#default-policies
+# https://kubernetes.io/docs/tasks/administer-cluster/declare-network-policy/
+# https://kubernetes.io/docs/concepts/services-networking/network-policies/
+
+# Шаг 1. Download the canal plugin:
+cloud_user@fas1c:~$ wget -O canal.yaml https://docs.projectcalico.org/v3.9/getting-started/kubernetes/installation/hosted/canal/canal.yaml
+
+# Шаг 2. Apply the canal plugin:
+cloud_user@fas1c:~$ kubectl apply -f canal.yaml
+
+# Шаг 3. The YAML for a deny-all NetworkPolicy:
+cloud_user@fas1c:~$ vim deny-all-netpolicing.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  
+cloud_user@fas1c:~$ kubectl apply -f deny-all-netpolicing.yaml
+networkpolicy.networking.k8s.io/deny-all created
+
+# Шаг 4. Run a deployment to test the NetworkPolicy:
+cloud_user@fas1c:~$ kubectl run nginxnew --image=nginx --replicas=2
+
+cloud_user@fas1c:~$ kubectl get deploy
+NAME        READY   UP-TO-DATE   AVAILABLE   AGE
+nginxnew    2/2     2            2           64s
+
+# Шаг 5. Create a service for the deployment:
+cloud_user@fas1c:~$ kubectl expose deployment nginxnew --port=80
+service/nginxnew exposed
+
+cloud_user@fas1c:~$ kubectl get services
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+nginxnew     ClusterIP   10.101.149.78    <none>        80/TCP         9s
+
+# Шаг 6. Attempt to access the service by using a busybox interactive pod (создаем под для проверки):
+cloud_user@fas1c:~$ kubectl run busybox --rm -it --image=busybox /bin/sh
+kubectl run --generator=deployment/apps.v1 is DEPRECATED and will be removed in a future version. Use kubectl run --generator=run-pod/v1 or kubectl create instead.
+If you don't see a command prompt, try pressing enter.
+/ # wget --spider --timeout=1 nginxnew  # команда проверки доступности пода
+Connecting to nginxnew (10.101.149.78:80)
+wget: download timed out # все заблокировано
+
+##### Пример изменения политики, где хосты помечены labels #####
+# Шаг 7. The YAML for a pod selector NetworkPolicy:
+cloud_user@fas1c:~$ vim db-netpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-netpolicy
+spec:
+  podSelector:
+    matchLabels:
+      app: db
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: web
+    ports:
+    - port: 5432
+	
+
+# Шаг 8. Label a pod to get the NetworkPolicy:
+cloud_user@fas1c:~$ kubectl get pods | grep new
+nginxnew-798fb765c5-4w9cg    1/1     Running   0          12m
+nginxnew-798fb765c5-csrrp    1/1     Running   0          12m
+
+cloud_user@fas1c:~$ kubectl label pods nginxnew-798fb765c5-4w9cg app=db
+pod/nginxnew-798fb765c5-4w9cg labeled
+
+cloud_user@fas1c:~$ kubectl label pods nginxnew-798fb765c5-csrrp app=web
+pod/nginxnew-798fb765c5-csrrp labeled
+
+##### Примеры разных сетевых политик #####
+# Шаг 9. The YAML for a namespace NetworkPolicy:
+cloud_user@fas1c:~$ vim ns-netpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ns-netpolicy
+spec:
+  podSelector:
+    matchLabels:
+      app: db
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          tenant: web
+    ports:
+    - port: 5432
+
+# Шаг 10. The YAML for an IP block NetworkPolicy:
+cloud_user@fas1c:~$ vim ipblock-netpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ipblock-netpolicy
+spec:
+  podSelector:
+    matchLabels:
+      app: db
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 192.168.1.0/24
+
+# Шаг 11. The YAML for an egress NetworkPolicy:
+cloud_user@fas1c:~$ vim egress-netpolicy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-netpol
+spec:
+  podSelector:
+    matchLabels:
+      app: web
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: db
+    ports:
+    - port: 5432
+	
+###############
+#Creating TLS Certificates#
+###############
+# Материалы:
+# https://kubernetes.io/docs/tasks/tls/managing-tls-in-a-cluster/
+# https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet-tls-bootstrapping/
+# https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-certs/
+
+# Все TLS сертификаты пробрасываются в поды с помощью default service-account
+
+# We’ll go through certificate requests and generating a new certificate.
+
+# Шаг 1. Find the CA certificate on a pod in your cluster:
+cloud_user@fas1c:~$ kubectl exec busybox -- ls /var/run/secrets/kubernetes.io/serviceaccount
+ca.crt # Нужный сертификат
+namespace
+token
+
+# Нам нужно создать новый сертификат. То есть нужно создать CSR 
+
+# Шаг 2. Download the binaries for the cfssl tool (на мастере):
+wget -q --show-progress --https-only --timestamping \
+  https://pkg.cfssl.org/R1.2/cfssl_linux-amd64 \
+  https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+  
+cloud_user@fas1c:~$ wget -q --show-progress --https-only --timestamping \
+>   https://pkg.cfssl.org/R1.2/cfssl_linux-amd64 \
+>   https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+cfssl_linux-amd64                       100%[=============================================================================>]   9.90M  29.4MB/s    in 0.3s
+cfssljson_linux-amd64                   100%[=============================================================================>]   2.17M  --.-KB/s    in 0.05s
+
+# Шаг 3. Make the binary files executable:
+cloud_user@fas1c:~$ chmod +x cfssl_linux-amd64 cfssljson_linux-amd64
+
+# Шаг 4. Move the files into your bin directory:
+cloud_user@fas1c:~$ sudo mv cfssl_linux-amd64 /usr/local/bin/cfssl
+[sudo] password for cloud_user:
+cloud_user@fas1c:~$ sudo mv cfssljson_linux-amd64 /usr/local/bin/cfssljson
+
+# Шаг 5. Check to see if you have cfssl installed correctly:
+cloud_user@fas1c:~$ cfssl version
+Version: 1.2.0
+Revision: dev
+Runtime: go1.6
+
+# Шаг 6. Create a CSR file:
+cat <<EOF | cfssl genkey - | cfssljson -bare server
+{
+  "hosts": [ # DNS-сервера
+    "my-svc.my-namespace.svc.cluster.local",
+    "my-pod.my-namespace.pod.cluster.local",
+    "172.168.0.24",
+    "10.0.34.2"
+  ],
+  "CN": "my-pod.my-namespace.pod.cluster.local", # На кого выпускается сертификат
+  "key": {
+    "algo": "ecdsa",
+    "size": 256
+  }
+}
+EOF
+
+cloud_user@fas1c:~$ cat <<EOF | cfssl genkey - | cfssljson -bare server
+> {
+>   "hosts": [
+>     "my-svc.my-namespace.svc.cluster.local",
+>     "my-pod.my-namespace.pod.cluster.local",
+>     "172.168.0.24",
+>     "10.0.34.2"
+>   ],
+>   "CN": "my-pod.my-namespace.pod.cluster.local",
+>   "key": {
+>     "algo": "ecdsa",
+>     "size": 256
+>   }
+> }
+> EOF
+2020/03/30 12:11:46 [INFO] generate received request
+2020/03/30 12:11:46 [INFO] received CSR
+2020/03/30 12:11:46 [INFO] generating key: ecdsa-256
+2020/03/30 12:11:46 [INFO] encoded CSR
+
+# Шаг 8. Create a CertificateSigningRequest API object (создать запрос на создание сертификата):
+cat <<EOF | kubectl create -f -
+apiVersion: certificates.k8s.io/v1beta1
+kind: CertificateSigningRequest
+metadata:
+  name: pod-csr.web
+spec:
+  groups:
+  - system:authenticated
+  request: $(cat server.csr | base64 | tr -d '\n')
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+EOF
+
+cloud_user@fas1c:~$ cat <<EOF | kubectl create -f -
+> apiVersion: certificates.k8s.io/v1beta1
+> kind: CertificateSigningRequest
+> metadata:
+>   name: pod-csr.web
+> spec:
+>   groups:
+>   - system:authenticated
+>   request: $(cat server.csr | base64 | tr -d '\n')
+>   usages:
+>   - digital signature
+>   - key encipherment
+>   - server auth
+> EOF
+certificatesigningrequest.certificates.k8s.io/pod-csr.web created
+
+# Шаг 9. View the CSRs in the cluster:
+cloud_user@fas1c:~$ kubectl get csr
+NAME          AGE   REQUESTOR          CONDITION
+pod-csr.web   24s   kubernetes-admin   Pending # В статусе Pending потому что ждет подтверждения от администратора кластера
+
+# Шаг 10. View additional details about the CSR:
+cloud_user@fas1c:~$ kubectl describe csr pod-csr.web
+Name:               pod-csr.web
+Labels:             <none>
+Annotations:        <none>
+CreationTimestamp:  Mon, 30 Mar 2020 12:12:19 +0000
+Requesting User:    kubernetes-admin
+Status:             Pending
+Subject:
+  Common Name:    my-pod.my-namespace.pod.cluster.local
+  Serial Number:
+Subject Alternative Names:
+         DNS Names:     my-svc.my-namespace.svc.cluster.local
+                        my-pod.my-namespace.pod.cluster.local
+         IP Addresses:  172.168.0.24
+                        10.0.34.2
+Events:  <none>
+
+# Шаг 11. Approve the CSR:
+cloud_user@fas1c:~$ kubectl certificate approve pod-csr.web
+certificatesigningrequest.certificates.k8s.io/pod-csr.web approved
+
+cloud_user@fas1c:~$ kubectl get csr
+NAME          AGE     REQUESTOR          CONDITION
+pod-csr.web   3m10s   kubernetes-admin   Approved,Issued # Подтвержден
+
+# Шаг 12. View the certificate within your CSR (посмотреть сертификат в CSR):
+cloud_user@fas1c:~$ kubectl get csr
+NAME          AGE     REQUESTOR          CONDITION
+pod-csr.web   3m10s   kubernetes-admin   Approved,Issued
+cloud_user@fas1c:~$ kubectl get csr pod-csr.web -o yaml
+apiVersion: certificates.k8s.io/v1beta1
+kind: CertificateSigningRequest
+metadata:
+  creationTimestamp: "2020-03-30T12:12:19Z"
+  name: pod-csr.web
+  resourceVersion: "370922"
+  selfLink: /apis/certificates.k8s.io/v1beta1/certificatesigningrequests/pod-csr.web
+  uid: 0b92e73b-6f4b-4010-ae6a-3fbf0de23a72
+spec:
+  groups:
+  - system:masters
+  - system:authenticated
+  request: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURSBSRVFVRVNULS0tLS0KTUlJQllqQ0NBUWdDQVFBd01ERXVNQ3dHQTFVRUF4TWxiWGt0Y0c5a0xtMTVMVzVoYldWemNHRmpaUzV3YjJRdQpZMngxYzNSbGNpNXNiMk5oYkRCWk1CTUdCeXFHU000OUFnRUdDQ3FHU000OUF3RUhBMElBQkZWMkdFOGJYbTdGCmFYajFOeXVnQm16cExxUC9tN0o1R1FyQ3g4VHNrbUU2Z3Vub0h4aDB1cUR16K3hWM1Z2d04zQXMyZmpVWTdXNEcKdjQ4UnZ0bnc2eGFnZGpCMEJna3Foa2lHOXcwQkNRNHhaekJsTUdNR0ExVWRFUVJjTUZxQ0pXMTVMWE4yWXk1dAplUzF1WVcxbGMzQmhZMlV1YzNaakxtTnNkWE4wWlhJdWJHOWpZV3lDSlcxNUxYQnZaQzV0ZVMxdVlXMWxjM0JoClkyVXVjRzlrTG1Oc2RYTjBaWEl1Ykc5allXeUhCS3lvQUJpSEJBb0FJZ0l3Q2dZSUtvWkl6ajBFQXdJRFNBQXcKUlFJaEFMaWRtZTB6Vbm5KMnNsWmpEcXpPaVNwQTNBbVR1SGt5N2RCMjRGdWhsQWlCTXJ3MUFQSVFFeVhMQQpja3gxUU96ajVkWjZSZGpoY09pSitweEYwdWFNMlE9PQotLS0tLUVORCBDRVJUSUZJQ0FURSBSRVFVRVNULS0tLS0K
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+  username: kubernetes-admin
+status:
+  certificate:  LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUN3ekNDQWF1Z0F3SUJBZ0lVSGQwTStQV2xINlZkT1Z2M25ZOVZ4ZytWemVRd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0ZURVRNQkVHQTFVRUF4TUthM1ZpWlhKdVpYUmxjekFlRncweU1EQXpNekF4TWpFd0mFGdzB5TVRBegpNekF4TWpFd01EQmFNREF4TGpBc0JnTlZCQU1USlcxNUxYQnZaQzV0ZVMxdVlXMWxjM0JoWTJVdWNHOWtMbU5zCmRYTjBaWEl1Ykc5allXd3dXVEFUQmdjcWhrak9QUUlCQmdncWhrak9QUU1CQndOQ0FBUlZkaGhQRzE1dXhXbDQKOVRjcm9BWnM2UzZqLzV1eWVSa0t3c2ZFN0pKaE9vTHA2QjhZZExxZzd2c1ZkMWI4RGR3TE5uNDFHTzF1QnIrUApFYjdaOE9zV280RzZNSUczTUE0R0ExVWREd0VCL3dRRUF3SUZvREFUQmdOVkhTVUVEREFLQmdnckJnRUZCUWNECkFUQU1CZ05WSFJNQkFmOEVBakFBTUIwR0ExVWREZ1FXQkJUcTF0cUtBeHl1UTlSM2hEYkdiU6VZXMUFwamZEQmoKQmdOVkhSRUVYREJhZ2lWdGVTMXpkbU11YlhrdGJtRnRaWE53WVdObExuTjJZeTVqYkhWemRHVnlMbXh2WTJGcwpnaVZ0ZVMxd2IyUXViWGt0Ym1GdFpYTndZV05sTG5CdlpDNWpiSFZ6ZEdWeUxteHZZMkZzaHdTc3FBQVlod1FLCkFDSUNNQTBHQ1NxR1NJYjNEUUVCQ3dVQUE0SUJBUUNDbGFjbmthTzArNWcvYitpdEJiL2RkTWF3aTBkdUdHQlkKRDJGVGdka0VRNzJuZlVRMnVMSzl2QXRlblJmeFo4QTU3Qm5qNnNCaXNJL1ZKL3hCMEMxOHI5c3lST3JZKzZPZQpuWDZkTmlibjMrdnphZ2R2MTB1UlJIVlRrNXpTMmI0RUpvbXN2a0hvejhQOE95ZWlrdFhOaXZCZHp2Q1RFejIrCnBjL3dsM1lRcEsxZkM3NlZxK3VkUXZJSEJxU3lTcEZ5MnBnSXRiWVQyNEI1bCtUYk5uOFNXZmc5YkNBZno4WmkKZ20wYnRRSlRHUkgvODlqdWhjNGFJVFRnY1FmRG9tZm5URUdINVB4V1VWVktlam81ampDajRLdGNsbi8zT3pYQQpIaTROclNHZlZFQndEQzNDOWt5NHZyRWxoWFp5UkNNN08yZ01EOXlhQW9XMDhLa25PY3ZYCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K # Нужный нам сертификат
+  conditions:
+  - lastUpdateTime: "2020-03-30T12:15:07Z"
+    message: This CSR was approved by kubectl certificate approve.
+    reason: KubectlApprove
+    type: Approved
+
+# Шаг 13. Extract and decode your certificate to use in a file:
+cloud_user@fas1c:~$ kubectl get csr pod-csr.web -o jsonpath='{.status.certificate}' \
+>     | base64 --decode
+-----BEGIN CERTIFICATE-----
+MIICwzCCAaugAwIBAgIUHd0M+PWlH6VdOVv3nY9Vxg+VzeQwDQYJKoZIhvcNAQEL
+BQAwFTETMBEGA1UEAxMKa3ViZXJuZXRlczAeFw0yMDAzMzAxMjEwMDBaFw0yMTAz
+MzAxMjEwMDBaMDAxLjAsBgNVBAMTJW15LXBvZC5teS1uYW1lc3BhY2UucG9kLmNs
+dXN0ZXIubG9jYWwwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARVdhhPG15uxWl4
+9TcroAZs6S6j/5uyeRkKwsfE7JJhOoLp6B8YdLqg7vsVd1b8DdwLNn41GO1uBr+P
+Eb7Z8OsWo4G6MIG3MA4GA1UdDwEB/wQEAwIFoDATBgNVHSUEDDAKBggrBgEFBQcD
+ATAMBgNVHRMBAf8EAjAAMB0GA1UdDgQWBBTq1tqKAxyuQ9R3hDbGbQVW1ApjfDBj
+BgNVHREEXDBagiVteS1zdmMubXktbmFtZXNwYWNlLnN2Yy5jbHVzdGVyLmxvY2Fs
+giVteS1wb2QubXktbmFtZXNwYWNlLnBvZC5jbHVzdGVyLmxvY2FshwSsqAAYhwQK
+ACICMA0GCSqGSIb3DQEBCwUAA4IBAQCClacnkaO0+5g/b+itBb/ddMawi0duGGBY
+D2FTgdkEQ72nfUQ2uLK9vAtenRfxZ8A57Bnj6sBisI/VJ/xB0C18r9syROrY+6Oe
+nX6dNibn3+vzagdv10uRRHVTk5zS2b4EJomsvkHoz8P8OyeiktXNivBdzvCTEz2+
+pc/wl3YQpK1fC76Vq+udQvIHBqSySpFy2pgItbYT24B5l+TbNn8SWfg9bCAfz8Zi
+gm0btQJTGRH/89juhc4aITTgcQfDomfnTEGH5PxWUVVKejo5jjCj4Ktcln/3OzXA
+Hi4NrSGfVEBwDC3C9ky4vrElhXZyRCM7O2gMD9yaAoW08KknOcvX
+-----END CERTIFICATE-----
+
+kubectl get csr pod-csr.web -o jsonpath='{.status.certificate}' \
+    | base64 --decode > server.crt
+	
+cloud_user@fas1c:~$ kubectl get csr pod-csr.web -o jsonpath='{.status.certificate}' \
+>     | base64 --decode > server.crt
+cloud_user@fas1c:~$ ls | grep ser
+kubeserve-deployment-readiness.yaml
+kubeserve-deployment.yaml
+nodeport-service.yaml
+server-key.pem
+server.crt # Созданный сертификат
+server.csr
+
+# Теперь этот сертификат можно использовать для аутентификации c API Server
+
+###############
+#Secure Images#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/containers/images/
+# https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
+# https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+# https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/#add-imagepullsecrets-to-a-service-account
+# https://kubernetes.io/blog/2018/07/18/11-ways-not-to-get-hacked/
+
+#We’ll go through how to set Kubernetes to use a private registry.
+
+# Шаг 1. View where your Docker credentials are stored:
+sudo vim /home/cloud_user/.docker/config.json
+
+# config.json будет пустым, если мы еще не логинились на Docker Hub
+
+# Шаг 2. Log in to the Docker Hub:
+sudo docker login
+
+# config.json будет содержать credendials к Docker Hub
+
+# Шаг 3. View the images currently on your server:
+sudo docker images
+
+# Получим список images, которые у нас хранятся на хост (в данном случае - на мсатере)
+# Задача в том, чтобы другие пользователи хоста не могли использовать эти images
+
+# Шаг 4. Pull a new image to use with a Kubernetes pod:
+sudo docker pull busybox:1.28.4
+
+# Шаг 5. Log in to a private registry using the docker login command:
+sudo docker login -u podofminerva -p 'otj701c9OucKZOCx5qrRblofcNRf3W+e' podofminerva.azurecr.io # podofminerva.azurecr.io - глобальное имя для хранилища репозиториев
+
+# Шаг 6. View your stored credentials:
+sudo vim /home/cloud_user/.docker/config.json
+
+# Тут изменилось содержание файла, так как мы подключились к другому репозиторию
+
+# Шаг 7. Tag an image in order to push it to a private registry:
+sudo docker tag busybox:1.28.4 podofminerva.azurecr.io/busybox:latest
+
+# Будут два images: busybox:1.28.4 и podofminerva.azurecr.io/busybox:latest
+
+# Шаг 8. Push the image to your private registry:
+docker push podofminerva.azurecr.io/busybox:latest
+
+# Шаг 9. Create a new docker-registry secret:
+kubectl create secret docker-registry acr --docker-server=https://podofminerva.azurecr.io --docker-username=podofminerva --docker-password='otj701c9OucKZOCx5qrRblofcNRf3W+e' --docker-email=user@example.com # acr - имя секрета
+
+# Шаг 10. Modify the default service account to use your new docker-registry secret:
+kubectl patch sa default -p '{"imagePullSecrets": [{"name": "acr"}]}'
+
+# Шаг 11. The YAML for a pod using an image from a private repository:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: acr-pod
+  labels:
+    app: busybox
+spec:
+  containers:
+    - name: busybox
+      image: podofminerva.azurecr.io/busybox:latest # Тип image, который мы должны скачивать с проверенного private registry (в нашем случае из Azure)
+      command: ['sh', '-c', 'echo Hello Kubernetes! && sleep 3600']
+      imagePullPolicy: Always
+
+# Шаг 12. Create the pod from the private image:
+kubectl apply -f acr-pod.yaml
+
+# Шаг 13. View the running pod:
+kubectl get pods
+
+###############
+#Defining Security Contexts#
+###############
+# Материалы:
+# https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+
+Defining security contexts allows you to lock down your containers, so that only certain processes can do certain things. This ensures the stability of your containers and allows you to give control or take it away. We’ll go through how to set the security context at the container level and the pod level.
+
+##### Пример со стандартным запуском пода #####
+# Шаг 1. Run an alpine container with default security:
+cloud_user@fas1c:~$ kubectl run pod-with-defaults --image alpine --restart Never -- /bin/sleep 999999
+pod/pod-with-defaults created
+
+# Шаг 2. Check the ID on the container:
+# id выводит не только сам UID, но и идентификатор группы пользователя, а также основные группы этого пользователя
+cloud_user@fas1c:~$ kubectl exec pod-with-defaults id 
+uid=0(root) gid=0(root) groups=0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+
+##### Пример с запуском пода от произвольного пользователя #####
+# Шаг 3. The YAML for a container that runs as a user:
+cloud_user@fas1c:~$ vim alpine-user-context.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: alpine-user-context
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", "999999"]
+    securityContext:
+      runAsUser: 405 # Значение 405 просто число, может быть любое значение
+
+# Шаг 4. Create a pod that runs the container as user:
+cloud_user@fas1c:~$ kubectl apply -f alpine-user-context.yaml
+pod/alpine-user-context created
+
+# Шаг 5. View the IDs of the new pod created with container user permission:
+cloud_user@fas1c:~$ kubectl exec alpine-user-context id
+uid=405(guest) gid=100(users)
+
+##### Пример с запуском пода от не root`a #####
+# Шаг 6. The YAML for a pod that runs the container as non-root:
+cloud_user@fas1c:~$ vim alpine-nonroot.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: alpine-nonroot
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", "999999"]
+    securityContext:
+      runAsNonRoot: true
+
+# Шаг 7. Create a pod that runs the container as non-root:
+cloud_user@fas1c:~$ kubectl apply -f alpine-nonroot.yaml
+pod/alpine-nonroot created
+
+cloud_user@fas1c:~$ kubectl get pods | grep alpine
+alpine-nonroot               0/1     CreateContainerConfigError   0          25s # Появилась ошибка при запуске контейнера
+alpine-user-context          1/1     Running                      0          12m
+
+cloud_user@fas1c:~$ # Шаг 8. View more information about the pod error:
+kubectl describe pod alpine-nonroot
+Events:
+  Type     Reason     Age                From                                   Message
+  ----     ------     ----               ----                                   -------
+  Normal   Scheduled  <unknown>          default-scheduler                      Successfully assigned default/alpine-nonroot to fas3c.mylabserver.com
+  Normal   Pulling    8s (x8 over 100s)  kubelet, fas3c.mylabserver.com  Pulling image "alpine"
+  Normal   Pulled     7s (x8 over 99s)   kubelet, fas3c.mylabserver.com  Successfully pulled image "alpine"
+  Warning  Failed     7s (x8 over 99s)   kubelet, fas3c.mylabserver.com  Error: container has runAsNonRoot and image will run as root  # причина ошибки
+
+#The Kubernetes Pod SecurityContext provides two options runAsNonRoot and runAsUser to enforce non root users. You can use both options separate from each other because they test for different configurations.
+
+#When you set runAsNonRoot: true you require that the container will run with a user with any UID other than 0. No matter which UID your user has.
+#When you set runAsUser: 333 you require that the container will run with a user with UID 333.
+
+# Объяснение причины:
+# As you can see, the only reason of that messages in your case is uid == nil. Based on the comment in the source code, we need to set a numeric user value.
+
+##### Пример с запуском пода c привилегиями #####
+# Шаг 9. The YAML for a privileged container pod:
+cloud_user@fas1c:~$ vim privileged-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: privileged-pod
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", "999999"]
+    securityContext:
+      privileged: true
+
+# Шаг 10. Create the privileged container pod:
+cloud_user@fas1c:~$ kubectl apply -f privileged-pod.yaml
+pod/privileged-pod created
+
+# Шаг 11. View the devices on the default container:
+cloud_user@fas1c:~$ kubectl exec -it pod-with-defaults ls /dev
+core             null             shm              termination-log
+fd               ptmx             stderr           tty
+full             pts              stdin            urandom
+mqueue           random           stdout           zero
+
+# Шаг 12. View the devices on the privileged pod container:
+cloud_user@fas1c:~$ kubectl exec -it privileged-pod ls /dev
+autofs              stdout              tty49
+btrfs-control       termination-log     tty5
+core                tty                 tty50
+cpu_dma_latency     tty0                tty51
+cuse                tty1                tty52
+ecryptfs            tty10               tty53
+fd                  tty11               tty54
+full                tty12               tty55
+fuse                tty13               tty56
+
+# Выод значительно больше из-за привелегий польователя
+
+##### Пример с запуском пода c возможностью выполнять конкретные команды #####
+# Шаг 13. Try to change the time on a default container pod:
+cloud_user@fas1c:~$ kubectl exec -it pod-with-defaults -- date +%T -s "12:00:00"
+date: can't set date: Operation not permitted
+12:00:00
+
+# Шаг 14. The YAML for a container that will allow you to change the time:
+cloud_user@fas1c:~$ vim kernelchange-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kernelchange-pod
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", "999999"]
+    securityContext:
+      capabilities:
+        add: ["NET_ADMIN", "SYS_TIME"]
+
+
+# Шаг 15. Create the pod that will allow you to change the container’s time:
+cloud_user@fas1c:~$ kubectl apply -f kernelchange-pod.yaml
+pod/kernelchange-pod created
+
+# Шаг 16. Change the time on a container:
+cloud_user@fas1c:~$ kubectl exec -it kernelchange-pod -- date +%T -s "12:00:00"
+12:00:00
+
+# Шаг 17. View the date on the container:
+cloud_user@fas1c:~$ kubectl exec -it kernelchange-pod -- date
+Tue Mar 31 12:00:15 UTC 2020
+
+# Время изменилось
+
+##### Пример с запуском пода c запретом выполнять конкретные команды #####
+# Шаг 18. The YAML for a container that removes capabilities:
+cloud_user@fas1c:~$ vim remove-capabilities.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: remove-capabilities
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", "999999"]
+    securityContext:
+      capabilities:
+        drop:
+        - CHOWN
+
+# Шаг 19. Create a pod that’s container has capabilities removed:
+cloud_user@fas1c:~$ kubectl apply -f remove-capabilities.yaml
+pod/remove-capabilities created
+
+# Шаг 20. Try to change the ownership of a container with removed capability:
+cloud_user@fas1c:~$ kubectl exec remove-capabilities chown guest /tmp
+chown: /tmp: Operation not permitted
+command terminated with exit code 1 # Нет прав на выполнение команды
+
+##### Пример с запуском пода c запретом записи на подключаемый том#####
+# Шаг 21. The YAML for a pod container that can’t write to the local filesystem:
+cloud_user@fas1c:~$ vim readonly-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: readonly-pod
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", "999999"]
+    securityContext:
+      readOnlyRootFilesystem: true
+    volumeMounts:
+    - name: my-volume
+      mountPath: /volume
+      readOnly: false
+  volumes:
+  - name: my-volume
+    emptyDir:
+
+# Шаг 22. Create a pod that will not allow you to write to the local container filesystem:
+cloud_user@fas1c:~$ kubectl apply -f readonly-pod.yaml
+pod/readonly-pod created
+
+# Шаг 23. Try to write to the container filesystem:
+cloud_user@fas1c:~$ kubectl exec -it readonly-pod touch /new-file
+touch: /new-file: Read-only file system
+command terminated with exit code 1
+
+# Шаг 24. Create a file on the volume mounted to the container:
+cloud_user@fas1c:~$ kubectl exec -it readonly-pod touch /volume/newfile
+
+# Шаг 25. View the file on the volume that’s mounted:
+cloud_user@fas1c:~$ kubectl exec -it readonly-pod -- ls -la /volume/newfile
+-rw-r--r--    1 root     root             0 Mar 31 12:16 /volume/newfile
+
+##### Пример с запуском пода c разными правами на группы  для разных контейнеров #####
+# Шаг 26. The YAML for a pod that has different group permissions for different containers:
+cloud_user@fas1c:~$ vim group-context.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: group-context
+spec:
+  securityContext:
+    fsGroup: 555
+    supplementalGroups: [666, 777]
+  containers:
+  - name: first
+    image: alpine
+    command: ["/bin/sleep", "999999"]
+    securityContext:
+      runAsUser: 1111
+    volumeMounts:
+    - name: shared-volume
+      mountPath: /volume
+      readOnly: false
+  - name: second
+    image: alpine
+    command: ["/bin/sleep", "999999"]
+    securityContext:
+      runAsUser: 2222
+    volumeMounts:
+    - name: shared-volume
+      mountPath: /volume
+      readOnly: false
+  volumes:
+  - name: shared-volume
+    emptyDir:
+
+# Шаг 27. Create a pod with two containers and different group permissions:
+cloud_user@fas1c:~$ kubectl apply -f group-context.yaml
+pod/group-context created
+
+# Шаг 28. Open a shell to the first container on that pod:
+cloud_user@fas1c:~$ kubectl exec -it group-context -c first sh
+/ $ id
+uid=1111 gid=0(root) groups=555,666,777
+/ $ ls -altr /volume/
+total 8
+drwxr-xr-x    1 root     root          4096 Mar 31 06:27 ..
+-rw-r--r--    1 1111     555              0 Mar 31 06:31 newfile # Группа 555 добавилась к тому
+drwxrwsrwx    2 root     555           4096 Mar 31 06:31 .
+/ $ touch /tmp/newfile
+/ $ ls -altr tmp/
+total 8
+drwxr-xr-x    1 root     root          4096 Mar 31 06:27 ..
+-rw-r--r--    1 1111     root             0 Mar 31 06:33 newfile # Группа осталась root, так как про этот том ничего не сказано в yaml-файле
+drwxrwxrwt    1 root     root          4096 Mar 31 06:33 .
+
+# Since fsGroup field is specified, all processes of the container are also part of the supplementary group ID 555. 
+
+# The supplementalGroups and fsGroup fields define the user groups or fsGroup-owned volumes that a container may access. Learn more about fsGroups and supplemental groups.
+# FSGroup - Controls the supplemental group applied to some volumes.
+# SupplementalGroups - Controls which group IDs containers add.
+
+###############
+#Securing Persistent Key Value Store#
+###############
+# Secrets are used to secure sensitive data you may access from your pod. The data never gets written to disk because it's stored in an in-memory filesystem (tmpfs). Because secrets can be created independently of pods, there is less risk of the secret being exposed during the pod lifecycle.
+
+# Шаг 1. View the secrets in your cluster:
+cloud_user@fas1c:~$ kubectl get secrets
+NAME                  TYPE                                  DATA   AGE
+appsecret             Opaque                                2      5d22h
+default-token-qhqkw   kubernetes.io/service-account-token   3      12d
+jenkins-token-q7sf8   kubernetes.io/service-account-token   3      3d21h
+
+# Шаг 2. View the default secret mounted to each pod:
+cloud_user@fas1c:~$ kubectl describe pods pod-with-defaults
+ Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from default-token-qhqkw (ro)
+Volumes:
+  default-token-qhqkw:
+    Type:        Secret (a volume populated by a Secret)
+    SecretName:  default-token-qhqkw
+    Optional:    false
+
+# Шаг 3. View the token, certificate, and namespace within the secret:
+cloud_user@fas1c:~$ kubectl describe secret default-token-qhqkw
+Name:         default-token-qhqkw
+Namespace:    default
+Labels:       <none>
+Annotations:  kubernetes.io/service-account.name: default
+              kubernetes.io/service-account.uid: b7ca8b98-9d41-4f23-83c6-188588c87b31
+
+Type:  kubernetes.io/service-account-token
+
+Data
+====
+ca.crt:     1025 bytes
+namespace:  7 bytes
+token:      eyJhbGciOiJSUzI1NiIsImtpZCI6IiJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZWZhdWx0Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6ImRlZmF1bHQtdG9rZW4tcWhxa3ciLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoiZGVmYXVsdCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6ImI3Y2E4Yjk4LTlkNDEtNGYyMy04M2M2LTE4ODU4OGM4N2IzMSIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpkZWZhdWx0OmRlZmF1bHQifQ.H-DAACO9s6NhjgaiPy9lMnxFz3Rz5wbEXmEs76Hk4D9yntARL6_n-lLANWQo6baQbwYrMjvyMg3dg3ZC-ND9IADMBlIHcZDxG2yMfDD-9QU-FPGrk1kIetexdgqkueEH3_zgsiVLr6vAlfWdWUZ8WH2-kExpqT-o_hQ2b0CTolgzfl3YpzsTGPjlvBHML7U32K7ZUbpObNwslpDYalEwJLgNx78d4As-KJWUwwB1OkNzBjkRwmXMciWOPCI31L-HAS2UGsDFqBzusZ4QLyoeSQXovXqFxn8JSAoToTlIVkyuDScg5Gg6SWbRh35bmItlZa-lURsytkWvDCKR4AOIjw
+
+# Шаг 4. Generate a private key for your https server:
+openssl genrsa -out https.key 2048
+
+# Шаг 5. Generate a certificate for the https server:
+cloud_user@fas1c:~$ openssl req -new -x509 -key https.key -out https.cert -days 3650 -subj /CN=www.example.com
+
+# Шаг 6. Create an empty file to create the secret:
+cloud_user@fas1c:~$ touch file
+
+# Шаг 7. Create a secret from your key, cert, and file:
+cloud_user@fas1c:~$ kubectl create secret generic example-https --from-file=https.key --from-file=https.cert --from-file=file
+secret/example-https created
+
+# Шаг 8. View the YAML from your new secret:
+cloud_user@fas1c:~$ kubectl get secrets example-https -o yaml
+apiVersion: v1
+data:
+  file: ""
+  https.cert: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURGVENDQWYyZ0F3SUJBZ0lVT3B2ZDB5citNd0M2c0NYUk5kSURuRFB2VFFBd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0dqRVlNQllHQTFVRUF3d1BkM2QzTG1WNFlXMXdiR1V1WTI5dE1CK
+  https.key: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFcFFJQkFBS0NBUUVBcFRweWlQR2YyTjE1dllBNXlkby9OMlkyK1UvQkxoYVJsanlzSmxWZnhEaW1HWWVPCjBha2tvV0prb3dBNUlyRjBWNU13ajdnMFlEZGczWjNWSFdHRnpa=
+kind: Secret
+metadata:
+  creationTimestamp: "2020-03-31T07:28:16Z"
+  name: example-https
+  namespace: default
+  resourceVersion: "403366"
+  selfLink: /api/v1/namespaces/default/secrets/example-https
+  uid: e2be376e-e821-4538-bc2f-82d6a24f8fab
+type: Opaque
+
+# Шаг 9. Create the configMap that will mount to your pod (конфигурация NGINX):
+cloud_user@fas1c:~$ vim configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config
+data:
+  my-nginx-config.conf: |
+    server {
+        listen              80;
+        listen              443 ssl;
+        server_name         www.example.com;
+        ssl_certificate     certs/https.cert; # Сертификат, который мы генерировали
+        ssl_certificate_key certs/https.key; # Ключ, который мы генерировали
+        ssl_protocols       TLSv1 TLSv1.1 TLSv1.2;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+
+        location / {
+            root   /usr/share/nginx/html;
+            index  index.html index.htm;
+        }
+
+    }
+  sleep-interval: |
+    25
+
+# Шаг 10. The YAML for a pod using the new secret:
+cloud_user@fas1c:~$ vim example-https.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-https
+spec:
+  containers:
+  - image: linuxacademycontent/fortune
+    name: html-web
+    env:
+    - name: INTERVAL
+      valueFrom:
+        configMapKeyRef:
+          name: config
+          key: sleep-interval
+    volumeMounts:
+    - name: html
+      mountPath: /var/htdocs
+  - image: nginx:alpine
+    name: web-server
+    volumeMounts:
+    - name: html
+      mountPath: /usr/share/nginx/html
+      readOnly: true
+    - name: config
+      mountPath: /etc/nginx/conf.d
+      readOnly: true
+    - name: certs
+      mountPath: /etc/nginx/certs/
+      readOnly: true
+    ports:
+    - containerPort: 80
+    - containerPort: 443
+  volumes:
+  - name: html
+    emptyDir: {}
+  - name: config
+    configMap:
+      name: config
+      items:
+      - key: my-nginx-config.conf # Это data в configMap
+        path: https.conf # В итоге этот файл будет в контейнере
+  - name: certs
+    secret:
+      secretName: example-https
+
+# Шаг 11. Apply the config map and the example-https yaml files:
+cloud_user@fas1c:~$ kubectl apply -f configmap.yaml
+configmap/config created
+cloud_user@fas1c:~$ kubectl apply -f example-https.yaml
+pod/example-https created
+
+!!!!!ОЧЕНЬ ВАЖНО
+cloud_user@fas1c:~$ kubectl exec -it example-https -c web-server -- ls /etc/nginx/conf.d/
+https.conf
+cloud_user@fas1c:~$ kubectl exec -it example-https -c web-server -- cat /etc/nginx/conf.d/https.conf
+server {
+    listen              80;
+    listen              443 ssl;
+    server_name         www.example.com;
+    ssl_certificate     certs/https.cert;
+    ssl_certificate_key certs/https.key;
+    ssl_protocols       TLSv1 TLSv1.1 TLSv1.2;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    location / {
+        root   /usr/share/nginx/html;
+        index  index.html index.htm;
+    }
+
+}
+
+# Шаг 12. Describe the nginx conf via ConfigMap:
+cloud_user@fas1c:~$ kubectl describe configmap config
+Name:         config
+Namespace:    default
+Labels:       <none>
+Annotations:  kubectl.kubernetes.io/last-applied-configuration:
+                {"apiVersion":"v1","data":{"my-nginx-config.conf":"server {\n    listen              80;\n    listen              443 ssl;\n    server_nam...
+
+Data
+====
+my-nginx-config.conf:
+----
+server {
+    listen              80;
+    listen              443 ssl;
+    server_name         www.example.com;
+    ssl_certificate     certs/https.cert;
+    ssl_certificate_key certs/https.key;
+    ssl_protocols       TLSv1 TLSv1.1 TLSv1.2;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    location / {
+        root   /usr/share/nginx/html;
+        index  index.html index.htm;
+    }
+
+}
+
+sleep-interval:
+----
+25
+
+Events:  <none>
+
+# Шаг 13. View the cert mounted on the container:
+cloud_user@fas1c:~$ kubectl exec example-https -c web-server -- mount | grep certs
+tmpfs on /etc/nginx/certs type tmpfs (ro,relatime)
+
+# Шаг 14. Use port forwarding on the pod to server traffic from 443:
+cloud_user@fas1c:~$ kubectl port-forward example-https 8443:443 &
+[1] 18851
+cloud_user@fas1c:~$ Forwarding from 127.0.0.1:8443 -> 443
+Forwarding from [::1]:8443 -> 443
+
+# Шаг 15. Curl the web server to get a response:
+# В параллельном окне
+cloud_user@fas1c:~$ curl https://localhost:8443 -k
+Q:      How many supply-siders does it take to change a light bulb?
+A:      None.  The darkness will cause the light bulb to change by itself.
+
+###############
+#Lab 1: Creating a ClusterRole to Access a PV in Kubernetes#
+###############
+View the Persistent Volume.
+	Use the following command to view the Persistent Volume within the cluster:
+		kubectl get pv
+
+Create a ClusterRole.
+	Use the following command to create the ClusterRole:
+		kubectl create clusterrole pv-reader --verb=get,list --resource=persistentvolumes 
+
+Create a ClusterRoleBinding.
+	Use the following command to create the ClusterRoleBinding:
+		kubectl create clusterrolebinding pv-test --clusterrole=pv-reader --serviceaccount=web:default
+
+Create a pod to access the PV.
+	Use the following YAML to create a pod that will proxy the connection and allow you to curl the address:
+	vim curlpod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: curlpod
+  namespace: web
+spec:
+  containers:
+  - image: tutum/curl
+    command: ["sleep", "9999999"]
+	name: main
+  - image: linuxacademycontent/kubectl-proxy
+    name: proxy
+  restartPolicy: Always
+
+	Use the following command to create the pod:
+		kubectl apply -f curlpod.yaml
+
+Request access to the PV from the pod.
+	Use the following command (from within the pod) to access a shell from the pod:
+		kubectl exec -it curlpod -n web -- sh
+
+	Use the following command to curl the PV resource:
+		curl localhost:8001/api/v1/persistentvolumes

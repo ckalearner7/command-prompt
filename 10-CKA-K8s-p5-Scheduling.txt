@@ -1,0 +1,876 @@
+						Pod Scheduling within the Kubernetes Cluster
+###############
+#Configuring the Kubernetes Scheduler#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
+# https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
+
+# Шаг 0. Информация о нодах
+cloud_user@fas1c:~$ kubectl get nodes
+NAME                           STATUS   ROLES    AGE     VERSION
+fas1c.mylabserver.com   Ready    master   4d21h   v1.16.6
+fas2c.mylabserver.com   Ready    <none>   3d19h   v1.16.6
+fas3c.mylabserver.com   Ready    <none>   4d20h   v1.16.6
+
+# Шаг 1. Label node 1 as being located in availability zone 1:
+cloud_user@fas1c:~$ kubectl label node fas2c.mylabserver.com availability-zone=zone1
+node/fas1c.mylabserver.com labeled
+
+cloud_user@fas1c:~$ kubectl describe node fas2c.mylabserver.com
+Name:               fas1c.mylabserver.com 
+Roles:              master
+Labels:             availability-zone=zone1 # Назначенный label
+                    beta.kubernetes.io/arch=amd64
+                    beta.kubernetes.io/os=linux
+                    kubernetes.io/arch=amd64
+                    kubernetes.io/hostname=fas1c.mylabserver.com
+                    kubernetes.io/os=linux
+                    node-role.kubernetes.io/master=
+
+
+# Шаг 2. Label node 2 as being located in availability zone 2:
+cloud_user@fas1c:~$ kubectl label node fas3c.mylabserver.com availability-zone=zone2
+node/fas2c.mylabserver.com labeled
+
+# Шаг 3. Label node 1 as dedicated infrastructure:
+cloud_user@fas1c:~$ kubectl label node fas2c.mylabserver.com share-type=dedicated
+node/fas1c.mylabserver.com labeled
+
+# Шаг 4. Label node 2 as shared infrastructure:
+cloud_user@fas1c:~$ kubectl label node fas3c.mylabserver.com share-type=shared
+node/fas2c.mylabserver.com labeled
+
+# Шаг 5. Here is the YAML for the deployment to include the node affinity rules:
+cloud_user@fas1c:~$  vim pref-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pref
+spec:
+  selector:
+    matchLabels:
+      app: pref
+  replicas: 5 # Создаем 5 копий
+  template:
+    metadata:
+      labels:
+        app: pref
+    spec:
+      affinity: # Описание условия
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 80 # Вес 80
+            preference:
+              matchExpressions:
+              - key: availability-zone
+                operator: In
+                values:
+                - zone1
+          - weight: 20 # Вес 20
+            preference:
+              matchExpressions:
+              - key: share-type
+                operator: In
+                values:
+                - dedicated
+      containers:
+      - args:
+        - sleep
+        - "99999"
+        image: busybox
+        name: main
+
+# Шаг 6. Create the deployment:
+cloud_user@fas1c:~$ kubectl create -f pref-deployment.yaml
+deployment.apps/pref created
+
+# Шаг 7. View the deployment:
+cloud_user@fas1c:~$ kubectl get deployments
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   1/1     1            1           4d18h
+pref    5/5     5            5           19s
+
+# Шаг 8. View which pods landed on which nodes:
+cloud_user@fas1c:~$ kubectl get pods -o wide | grep pref
+pref-6585cd5654-2rs44    1/1     Running   0          61s     10.244.1.8    fas2c.mylabserver.com   <none>           <none>
+pref-6585cd5654-6s42c    1/1     Running   0          61s     10.244.1.7    fas2c.mylabserver.com   <none>           <none>
+pref-6585cd5654-kl54x    1/1     Running   0          61s     10.244.2.16   fas2c.mylabserver.com   <none>           <none>
+pref-6585cd5654-q86gl    1/1     Running   0          61s     10.244.1.6    fas2c.mylabserver.com   <none>           <none>
+pref-6585cd5654-tvdd5    1/1     Running   0          61s     10.244.2.15   fas3c.mylabserver.com   <none>           <none>
+
+# Ноды распределились по весам. 4 пода на ноде fas2c.mylabserver.com, а 1 на fas3c.mylabserver.com (1 под - 20 %)
+
+###############
+#Running Multiple Schedulers for Multiple Pods#
+###############
+# Материалы https://kubernetes.io/docs/tasks/administer-cluster/configure-multiple-schedulers/
+
+# Subjects (субъекты) — совокупность пользователей и процессов, которые хотят иметь доступ в Kubernetes API;
+# Resources (ресурсы) — совокупность объектов Kubernetes API, доступных в кластере. Их примерами (среди прочих) являются Pods, Deployments, Services, Nodes, PersistentVolumes;
+# Verbs (глаголы) — совокупность операций, которые могут быть выполнены над ресурсами. Существуют различные verbs (get, watch, create, delete и т.п.), но все они в конечном счёте #являются операциями из разряда CRUD (Create, Read, Update, Delete).
+
+# Roles соединяют ресурсы и глаголы. Они могут повторно использоваться для разных субъектов. Привязаны к одному пространству имён (мы не можем использовать шаблоны, представляющие #более одного [пространства имён], зато можем деплоить один и тот же объект роли в разные пространства имён). Если вы хотите применить роль ко всему кластеру, есть аналогичный #объект ClusterRoles.
+# RoleBindings соединяют оставшиеся сущности-субъекты. Указав роль, которая уже связывает объекты API с глаголами, теперь мы выбираем субъекты, которые могут их использовать. 
+#Эквивалентом для уровня кластера (т.е. без привязки к пространствам имён) является ClusterRoleBindings.
+
+# Шаг 0. Создаем файл my-scheduler.yaml. Шаблон берем с сайта https://kubernetes.io/docs/tasks/administer-cluster/configure-multiple-schedulers/
+# Но меняем image для контейнера (пока не углубляться в подробности)
+cloud_user@fas1c:~$ vi my-scheduler.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-scheduler
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: my-scheduler-as-kube-scheduler
+subjects:
+- kind: ServiceAccount
+  name: my-scheduler
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: system:kube-scheduler
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    component: scheduler
+    tier: control-plane
+  name: my-scheduler
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      component: scheduler
+      tier: control-plane
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        component: scheduler
+        tier: control-plane
+        version: second
+    spec:
+      serviceAccountName: my-scheduler
+      containers:
+      - command:
+        - /usr/local/bin/kube-scheduler
+        - --address=0.0.0.0
+        - --leader-elect=false
+        - --scheduler-name=my-scheduler
+        image: chadmcrowell/custom-scheduler # Но меняем image
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 10251
+          initialDelaySeconds: 15
+        name: kube-second-scheduler
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 10251
+        resources:
+          requests:
+            cpu: '0.1'
+        securityContext:
+          privileged: false
+        volumeMounts: []
+      hostNetwork: false
+      hostPID: false
+      volumes: []
+
+# Шаг 1. Создать ClusterRole для соединения ресурсы и глаголы
+cloud_user@fas1c:~$ vi clusterrole.yaml
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: csinodes-admin
+rules:
+- apiGroups: ["storage.k8s.io"]
+  resources: ["csinodes"] # Ресурс - нода
+  verbs: ["get", "watch", "list"]  # Глаголы
+
+
+# Шаг 2. Создать ClusterRoleBinding.yaml для выбора субъектов, которые могут использовать ClusterRole из шага 1
+cloud_user@fas1c:~$ vim clusterrolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: read-csinodes-global
+subjects:
+- kind: ServiceAccount # ServiceAccounts — ограниченные пространством имён и предназначенные для процессов внутри кластера, запущенных на подах.
+  name: my-scheduler # Распространяется на наш my-scheduler из шага 0
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole # Роль из шага 1
+  name: csinodes-admin
+  apiGroup: rbac.authorization.k8s.io
+
+# Шаг 3. Создаем clusterrole.yaml и clusterrolebinding.yaml для нашего my-scheduler.yaml
+cloud_user@fas1c:~$ kubectl create -f clusterrole.yaml
+clusterrole.rbac.authorization.k8s.io/csinodes-admin created
+
+cloud_user@fas1c:~$ kubectl create -f clusterrolebinding.yaml
+clusterrolebinding.rbac.authorization.k8s.io/read-csinodes-global created
+
+# Шаг 4. Новая роль в отдельном ns - kube-system
+cloud_user@fas1c:~$ vim role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: system:serviceaccount:kube-system:my-scheduler
+  namespace: kube-system
+rules:
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - csinodes
+  verbs:
+  - get
+  - list
+  - watch
+
+# Шаг 4. Новая RoleBinding в отдельном ns - kube-system
+cloud_user@fas1c:~$ vim rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-csinodes
+  namespace: kube-system
+subjects:
+- kind: User # Users — глобальные пользователи, предназначены для людей или процессов, живущих вне кластера;
+  name: kubernetes-admin # Пользователь
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role  # Роль из шага 3
+  name: system:serviceaccount:kube-system:my-scheduler
+  apiGroup: rbac.authorization.k8s.io
+  
+# Шаг 5. Создаем role.yaml и rolebinding.yaml
+cloud_user@fas1c:~$ kubectl create -f role.yaml
+role.rbac.authorization.k8s.io/system:serviceaccount:kube-system:my-scheduler created
+
+cloud_user@fas1c:~$ kubectl create -f rolebinding.yaml
+rolebinding.rbac.authorization.k8s.io/read-csinodes created
+
+# Шаг 6. Edit the existing kube-scheduler cluster role with kubectl edit clusterrole system:kube-scheduler and add the following:
+cloud_user@fas1c:~$ kubectl edit clusterrole system:kube-scheduler
+...
+  resourceNames:
+  - kube-scheduler
+  - my-scheduler # Добавить
+...
+
+# Шаг 7. Run the deployment for my-scheduler:
+cloud_user@fas1c:~$ kubectl create -f my-scheduler.yaml
+serviceaccount/my-scheduler created
+clusterrolebinding.rbac.authorization.k8s.io/my-scheduler-as-kube-scheduler created
+deployment.apps/my-scheduler created
+
+# Шаг 8. View your new scheduler in the kube-system namespace:
+cloud_user@fas1c:~$ kubectl get pods -n kube-system
+NAME                                                   READY   STATUS    RESTARTS   AGE
+coredns-5644d7b6d9-hd88r                               1/1     Running   3          3d21h
+coredns-5644d7b6d9-jb5rx                               1/1     Running   4          4d1h
+etcd-fas1c.mylabserver.com                      1/1     Running   3          4d1h
+kube-apiserver-fas1c.mylabserver.com            1/1     Running   3          4d1h
+kube-controller-manager-fas1c.mylabserver.com   1/1     Running   3          4d1h
+kube-flannel-ds-amd64-cjzgs                            1/1     Running   9          4d22h
+kube-flannel-ds-amd64-n9q98                            1/1     Running   9          4d22h
+kube-flannel-ds-amd64-p5267                            1/1     Running   5          3d21h
+kube-proxy-44wtt                                       1/1     Running   4          4d1h
+kube-proxy-kwt9w                                       1/1     Running   4          3d21h
+kube-proxy-v4vdb                                       1/1     Running   4          4d1h
+kube-scheduler-fas1c.mylabserver.com            1/1     Running   3          4d1h #Default scheduler
+my-scheduler-789cb54bc9-9t9j4                          1/1     Running   0          33s # Добавился новый scheduler
+
+# Шаг 9. pod1.yaml
+cloud_user@fas1c:~$ vim pod1.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-annotation # Не указывает тип scheduler
+  labels:
+    name: multischeduler-example
+spec:
+  containers:
+  - name: pod-with-no-annotation-container
+    image: k8s.gcr.io/pause:2.0
+	
+cloud_user@fas1c:~$ kubectl create -f pod1.yaml
+pod/no-annotation created
+
+# Шаг 10. pod2.yaml
+cloud_user@fas1c:~$ vim pod2.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: annotation-default-scheduler
+  labels:
+    name: multischeduler-example
+spec:
+  schedulerName: default-scheduler # Устанавливает default-scheduler
+  containers:
+  - name: pod-with-default-annotation-container
+    image: k8s.gcr.io/pause:2.0
+	
+cloud_user@fas1c:~$ kubectl create -f pod2.yaml
+pod/annotation-default-scheduler created
+
+# Шаг 11. pod3.yaml
+cloud_user@fas1c:~$ vim pod3.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: annotation-second-scheduler
+  labels:
+    name: multischeduler-example
+spec:
+  schedulerName: my-scheduler # Устанавливает наш кастомный scheduler
+  containers:
+  - name: pod-with-second-annotation-container
+    image: k8s.gcr.io/pause:2.0
+
+cloud_user@fas1c:~$ kubectl create -f pod3.yaml
+pod/annotation-second-scheduler created
+
+
+# Шаг 12. View the pods as they are created:
+cloud_user@fas1c:~$ kubectl get pods -o wide | grep anno
+annotation-default-scheduler   1/1     Running   0          4m3s    10.244.2.18   fas3c.mylabserver.com   <none>           <none>
+annotation-second-scheduler    0/1     Pending   0          3m57s   <none>        <none>                         <none>           <none>
+no-annotation                  1/1     Running   0          4m12s   10.244.1.9    fas2c.mylabserver.com   <none>           <none>
+
+# В итоге разные scheduler обслуживают разные поды. Под с кастомным scheduler почему-то не запустился
+
+###############
+#Scheduling Pods with Resource Limits and Label Selectors#
+###############
+
+# Материалы:
+# https://kubernetes.io/docs/tasks/administer-cluster/manage-resources/cpu-default-namespace/
+# https://kubernetes.io/docs/tasks/administer-cluster/manage-resources/memory-default-namespace/
+
+# Шаг 1. View the capacity and the allocatable info from a node:
+cloud_user@fas1c:~$ kubectl describe nodes
+Taints:             node-role.kubernetes.io/master:NoSchedule # Это означает, что ни один под не сможет планировать развертывание на узел master, если у него нет соответствующего допуска.
+
+# И тут у нас есть два варианта развития событий:
+# 	— Предоставить соответствующий допуск самому поду.
+# 	— Отключить эту политику для данного узла.
+
+cloud_user@fas1c:~$ kubectl get pods kube-proxy-44wtt -n kube-system -o yaml
+  tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+  - operator: Exists
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+  - effect: NoSchedule
+    key: node.kubernetes.io/disk-pressure
+    operator: Exists
+  - effect: NoSchedule
+    key: node.kubernetes.io/memory-pressure
+    operator: Exists
+  - effect: NoSchedule
+    key: node.kubernetes.io/pid-pressure
+    operator: Exists
+  - effect: NoSchedule # Значение эффекта -NoSchedule
+    key: node.kubernetes.io/unschedulable # Говорит о том, что такой под может быть создан на любой ноде
+    operator: Exists
+  - effect: NoSchedule
+    key: node.kubernetes.io/network-unavailable
+    operator: Exists
+
+cloud_user@fas1c:~$ kubectl describe nodes
+Capacity: # Вместимость (сколько всего ресурсов на ноде)
+ cpu:                2
+ ephemeral-storage:  20263484Ki
+ hugepages-1Gi:      0
+ hugepages-2Mi:      0
+ memory:             2002424Ki
+ pods:               110
+Allocatable: # Размещено (сколько ресурсов может быть выделено для подов)
+ cpu:                2
+ ephemeral-storage:  18674826824
+ hugepages-1Gi:      0
+ hugepages-2Mi:      0
+ memory:             1900024Ki
+ pods:               110
+
+
+# Шаг 2. The pod YAML for a pod with requests:
+# Было:
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests    Limits
+  --------           --------    ------
+  cpu                300m (15%)  100m (5%)
+  memory             120Mi (6%)  220Mi (11%)
+  ephemeral-storage  0 (0%)      0 (0%)
+
+cloud_user@fas1c:~$ vim resource-pod1.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-pod1
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: "fas3c.mylabserver.com"
+  containers:
+  - image: busybox
+    command: ["dd", "if=/dev/zero", "of=/dev/null"]
+    name: pod1
+    resources:
+      requests:
+        cpu: 800m # CPU в милли cpu, что равно 1/1000 от процессоронго ядра. То есть 1000 миллицпу это одно ядро процессора ноды
+        memory: 20Mi # Память выделяется в мегабайтах
+
+# Стало:
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests     Limits
+  --------           --------     ------
+  cpu                1100m (55%)  100m (5%)
+  memory             140Mi (7%)   220Mi (11%)
+  ephemeral-storage  0 (0%)       0 (0%)
+
+
+# Шаг 3. Create the requests pod:
+cloud_user@fas1c:~$ kubectl create -f resource-pod1.yaml
+pod/resource-pod1 created
+
+# Шаг 4. View the pods and nodes they landed on:
+cloud_user@fas1c:~$ kubectl get pods -o wide | grep res
+resource-pod1            1/1     Running   0          7s      10.244.2.25   fas3c.mylabserver.com   <none>           <none>
+
+# Шаг 5. The YAML for a pod that has a large request:
+cloud_user@fas1c:~$ vim resource-pod2.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-pod2
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: "fas3c.mylabserver.com"
+  containers:
+  - image: busybox
+    command: ["dd", "if=/dev/zero", "of=/dev/null"]
+    name: pod2
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 20Mi
+
+# Шаг 6. Create the pod with 1000 millicore request:
+cloud_user@fas1c:~$ kubectl create -f resource-pod2.yaml
+pod/resource-pod2 created
+
+# Шаг 7. See why the pod with a large request didn’t get scheduled:
+cloud_user@fas1c:~$ kubectl describe pod resource-pod2
+Events:
+  Type     Reason            Age   From               Message
+  ----     ------            ----  ----               -------
+  Warning  FailedScheduling  30s   default-scheduler  0/3 nodes are available: 1 Insufficient cpu, 2 node(s) didn't match node selector.
+
+# Не хватает ресурсов
+
+# Шаг 8. Look at the total requests per node:
+cloud_user@fas1c:~$ kubectl describe nodes fas3c.mylabserver.com
+Non-terminated Pods:         (9 in total)
+  Namespace                  Name                             CPU Requests  CPU Limits  Memory Requests  Memory Limits  AGE
+  ---------                  ----                             ------------  ----------  ---------------  -------------  ---
+  default                    nginx-7bb7cd8db5-2cbp2           0 (0%)        0 (0%)      0 (0%)           0 (0%)         4d4h
+  default                    pref-6585cd5654-kl54x            0 (0%)        0 (0%)      0 (0%)           0 (0%)         8h
+  default                    pref-6585cd5654-tvdd5            0 (0%)        0 (0%)      0 (0%)           0 (0%)         8h
+  default                    resource-pod1                    800m (40%)    0 (0%)      20Mi (1%)        0 (0%)         9m46s # Требовательный под
+  kube-system                coredns-5644d7b6d9-jb5rx         100m (5%)     0 (0%)      70Mi (3%)        170Mi (9%)     4d7h
+  kube-system                kube-flannel-ds-amd64-n9q98      100m (5%)     100m (5%)   50Mi (2%)        50Mi (2%)      5d5h
+  kube-system                kube-proxy-v4vdb                 0 (0%)        0 (0%)      0 (0%)           0 (0%)         4d7h
+  kube-system                my-scheduler-789cb54bc9-9t9j4    100m (5%)     0 (0%)      0 (0%)           0 (0%)         6h31m
+  my-ns                      test-54776597d6-zcqmn            0 (0%)        0 (0%)      0 (0%)           0 (0%)         5d4h
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests     Limits
+  --------           --------     ------
+  cpu                1100m (55%)  100m (5%)
+  memory             140Mi (7%)   220Mi (11%)
+  ephemeral-storage  0 (0%)       0 (0%)
+  
+# Шаг 9. Delete the first pod to make room for the pod with a large request:
+cloud_user@fas1c:~$ kubectl delete pods resource-pod1
+pod "resource-pod1" deleted
+
+# Шаг 10. Watch as the first pod is terminated and the second pod is started:
+cloud_user@fas1c:~$ kubectl get pods -o wide -w | grep res
+NAME                     READY   STATUS    RESTARTS   AGE     IP            NODE                           NOMINATED NODE   READINESS GATES
+resource-pod2            1/1     Running   0          5m29s   10.244.2.26   fas3c.mylabserver.com   <none>           <none>
+
+# Как только освободились ресурсы, сразу стартовал второй под
+
+# Шаг 11. The YAML for a pod that has limits:
+cloud_user@fas1c:~$ vim limited-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: limited-pod
+spec:
+  containers:
+  - image: busybox
+    command: ["dd", "if=/dev/zero", "of=/dev/null"]
+    name: main
+    resources:
+      limits: # Максимум, который может использовать под
+        cpu: 1
+        memory: 20Mi
+
+# Шаг 12. Create a pod with limits:
+# Было:
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests     Limits
+  --------           --------     ------
+  cpu                1300m (65%)  100m (5%)
+  memory             140Mi (7%)   220Mi (11%)
+  ephemeral-storage  0 (0%)       0 (0%)
+
+cloud_user@fas1c:~$ kubectl create -f limited-pod.yaml
+pod/limited-pod created
+
+# Стало:
+Allocated resources:
+  (Total limits may be over 100 percent, i.e., overcommitted.)
+  Resource           Requests     Limits
+  --------           --------     ------
+  cpu                1300m (65%)  100m (5%)
+  memory             140Mi (7%)   220Mi (11%)
+  ephemeral-storage  0 (0%)       0 (0%)
+
+
+# Шаг 13. Use the exec utility to use the top command:
+cloud_user@fas1c:~$ kubectl exec -it limited-pod top
+Mem: 1114996K used, 887428K free, 5904K shrd, 79212K buff, 576424K cached # Память больше, чем в лимите, так как top показывает память для ноды, а не для контейнера
+CPU: 23.5% usr 21.9% sys  0.9% nic 53.5% idle  0.0% io  0.0% irq  0.0% sirq
+Load average: 0.87 0.39 0.27 3/459 10
+  PID  PPID USER     STAT   VSZ %VSZ CPU %CPU COMMAND
+    1     0 root     R     1296  0.0   1 43.3 dd if /dev/zero of /dev/null
+    6     0 root     R     1304  0.0   1  0.0 top
+
+#Если явно задан только limits ресурса, то requests для этого ресурса автоматически принимает значение, равное limits (в этом можно убедиться, вызвав describe сущности). Т.е. #фактически работа контейнера будет ограничена таким же количеством ресурсов, которое он требует для своего запуска.
+
+#Если для ресурса явно задан только requests, то никаких ограничений сверху на этот ресурс не задается — т.е. контейнер ограничен только ресурсами самой ноды.
+
+###############
+#DaemonSets and Manually Scheduled Pods#
+###############
+# Материалы: https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/
+# DaemonSet в свою очередь является контроллером, основным назначением которого является запуск подов на всех нодах кластера: если нода добавляется/удаляется — DaemonSet автоматически добавит/удалит под на этой ноде.
+
+DaemonSet подходят для запуска приложений, которые должны работать на всех нодах, например — екпортёры мониторинга, сбор логов и так далее.
+# DaemonSets do not use a scheduler to deploy pods. In fact, there are currently DaemonSets in the Kubernetes cluster that we made.
+
+# Шаг 1. Find the DaemonSet pods that exist in your kubeadm cluster:
+cloud_user@fas1c:~$ kubectl get pods -n kube-system -o wide
+NAME                                                   READY   STATUS    RESTARTS   AGE     IP               NODE                           NOMINATED NODE   READINESS GATES
+coredns-5644d7b6d9-hd88r                               1/1     Running   5          4d20h   10.244.0.12      fas1c.mylabserver.com   <none>           <none>
+coredns-5644d7b6d9-jb5rx                               1/1     Running   6          5d      10.244.2.29      fas3c.mylabserver.com   <none>           <none>
+etcd-fas1c.mylabserver.com                      1/1     Running   5          5d      172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+kube-apiserver-fas1c.mylabserver.com            1/1     Running   5          5d      172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+kube-controller-manager-fas1c.mylabserver.com   1/1     Running   5          5d      172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+kube-flannel-ds-amd64-cjzgs                            1/1     Running   11         5d21h   172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+kube-flannel-ds-amd64-n9q98                            1/1     Running   13         5d21h   172.31.97.119    fas3c.mylabserver.com   <none>           <none>
+kube-flannel-ds-amd64-p5267                            1/1     Running   8          4d19h   172.31.102.146   fas2c.mylabserver.com   <none>           <none>  
+kube-proxy-44wtt                                       1/1     Running   6          5d      172.31.110.22    fas1c.mylabserver.com   <none>           <none> # Использует DaemonSets
+kube-proxy-kwt9w                                       1/1     Running   6          4d19h   172.31.102.146   fas2c.mylabserver.com   <none>           <none> # Использует DaemonSets
+kube-proxy-v4vdb                                       1/1     Running   6          5d      172.31.97.119    fas3c.mylabserver.com   <none>           <none> # Использует DaemonSets
+kube-scheduler-fas1c.mylabserver.com            1/1     Running   5          5d      172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+my-scheduler-789cb54bc9-9t9j4                          1/1     Running   2          22h     10.244.2.31      fas3c.mylabserver.com   <none>           <none>
+
+# Шаг 2. Delete a DaemonSet pod and see what happens:
+cloud_user@fas1c:~$ kubectl delete pods kube-proxy-kwt9w -n kube-system
+pod "kube-proxy-kwt9w" deleted
+
+cloud_user@fas1c:~$ kubectl get pods -n kube-system -o wide | grep proxy
+kube-proxy-44wtt                                       1/1     Running   6          5d      172.31.110.22    fas1c.mylabserver.com   <none>           <none>
+kube-proxy-4vnpl                                       1/1     Running   0          17s     172.31.102.146   fas2c.mylabserver.com   <none>           <none>
+kube-proxy-v4vdb                                       1/1     Running   6          5d      172.31.97.119    fas3c.mylabserver.com   <none>           <none>
+
+# Если удалить под, запущенный с помощью DaemonSet, то на его месте сразу появится новый (kube-proxy-4vnpl вместо kube-proxy-kwt9w на fas2c.mylabserver.com)
+
+# Шаг 3. Give the node a label to signify it has SSD:
+cloud_user@fas1c:~$ kubectl label node fas3c.mylabserver.com disk=ssd
+node/fas3c.mylabserver.com labeled
+
+cloud_user@fas1c:~$ kubectl describe node fas3c.mylabserver.com
+Name:               fas3c.mylabserver.com
+Roles:              <none>
+Labels:             beta.kubernetes.io/arch=amd64
+                    beta.kubernetes.io/os=linux
+                    disk=ssd # Новый label
+
+# Шаг 4. The YAML for a DaemonSet:
+cloud_user@fas1c:~$ vim ssd-monitor.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ssd-monitor
+spec:
+  selector:
+    matchLabels:
+      app: ssd-monitor
+  template:
+    metadata:
+      labels:
+        app: ssd-monitor
+    spec:
+      nodeSelector:
+        disk: ssd
+      containers:
+      - name: main
+        image: linuxacademycontent/ssd-monitor
+
+# Шаг 5. Create a DaemonSet from a YAML spec:
+cloud_user@fas1c:~$ kubectl get pods -o wide| grep ssd
+ssd-monitor-4rjcl        1/1     Running   0          30s     10.244.2.34   fas3c.mylabserver.com   <none>           <none>
+
+# Шаг 6. Label another node to specify it has SSD:
+cloud_user@fas1c:~$ kubectl label node fas2c.mylabserver.com disk=ssd
+node/fas2c.mylabserver.com labeled
+
+# Шаг 7. View the DaemonSet pods that have been deployed:
+cloud_user@fas1c:~$ kubectl get pods -o wide| grep ssd
+ssd-monitor-4rjcl        1/1     Running   0          81s     10.244.2.34   fas3c.mylabserver.com   <none>           <none>
+ssd-monitor-p692h        1/1     Running   0          8s      10.244.1.22   fas2c.mylabserver.com   <none>           <none>
+
+# Если другой ноде присвоить тот же label, то на ней сразу появится под из DaemonSet
+
+# Шаг 8. Remove the label from a node and watch the DaemonSet pod terminate:
+cloud_user@fas1c:~$ kubectl label node fas3c.mylabserver.com disk-
+node/fas3c.mylabserver.com labeled
+
+cloud_user@fas1c:~$ kubectl get pods -o wide| grep ssd
+ssd-monitor-p692h        1/1     Running       0          2m26s   10.244.1.22   fas2c.mylabserver.com   <none>           <none>
+
+# DaemonSet сразу удалил под
+
+# Шаг 9. Change the label on a node to change it to spinning disk:
+cloud_user@fas1c:~$ kubectl label node fas2c.mylabserver.com disk=hdd --overwrite
+node/fas2c.mylabserver.com labeled
+
+cloud_user@fas1c:~$ kubectl get pods -o wide| grep ssd
+ssd-monitor-p692h        1/1     Terminating   0          4m28s   10.244.1.22   fas2c.mylabserver.com   <none>           <none>
+
+cloud_user@fas1c:~$ kubectl get pods -o wide| grep ssd
+cloud_user@fas1c:~$
+
+# Под перешел в состояние Terminating, а потом удалился
+
+# Шаг 10. Pick the label to choose for your DaemonSet:
+cloud_user@fas1c:~$ kubectl get nodes fas3c.mylabserver.com --show-labels
+NAME                           STATUS   ROLES    AGE     VERSION   LABELS
+fas3c.mylabserver.com   Ready    <none>   5d21h   v1.16.6   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=fas3c.mylabserver.com,kubernetes.io/os=linux
+
+###############
+#Displaying Scheduler Events#
+###############
+# Материалы https://kubernetes.io/docs/tasks/administer-cluster/configure-multiple-schedulers/#verifying-that-the-pods-were-scheduled-using-the-desired-schedulers
+
+# Шаг 1. View the name of the scheduler pod:
+cloud_user@fas1c:~$ kubectl get pods -n kube-system | grep sche
+kube-scheduler-fas1c.mylabserver.com            1/1     Running   5          5d # 
+my-scheduler-789cb54bc9-9t9j4                          1/1     Running   2          23h
+
+# Шаг 2. Get the information about your scheduler pod events:
+cloud_user@fas1c:~$ kubectl describe pods kube-scheduler-fas1c.mylabserver.com -n kube-system
+Events:
+  Type    Reason          Age   From                                   Message
+  ----    ------          ----  ----                                   -------
+  Normal  SandboxChanged  49m   kubelet, fas1c.mylabserver.com  Pod sandbox changed, it will be killed and re-created.
+  Normal  Pulled          49m   kubelet, fas1c.mylabserver.com  Container image "k8s.gcr.io/kube-scheduler:v1.16.6" already present on machine
+  Normal  Created         49m   kubelet, fas1c.mylabserver.com  Created container kube-scheduler
+  Normal  Started         49m   kubelet, fas1c.mylabserver.com  Started container kube-scheduler
+
+# Шаг 3. View the events in your default namespace:
+cloud_user@fas1c:~$ kubectl get events
+28m         Normal    Created                   pod/ssd-monitor-p692h               Created container main
+28m         Normal    Started                   pod/ssd-monitor-p692h               Started container main
+24m         Normal    Killing                   pod/ssd-monitor-p692h               Stopping container main
+29m         Normal    SuccessfulCreate          daemonset/ssd-monitor               Created pod: ssd-monitor-4rjcl
+28m         Normal    SuccessfulCreate          daemonset/ssd-monitor               Created pod: ssd-monitor-p692h
+26m         Normal    SuccessfulDelete          daemonset/ssd-monitor               Deleted pod: ssd-monitor-4rjcl
+24m         Normal    SuccessfulDelete          daemonset/ssd-monitor               Deleted pod: ssd-monitor-p692h
+
+# Шаг 4. View the events in your kube-system namespace:
+cloud_user@fas1c:~$ kubectl get events -n kube-system
+
+# Шаг 5. Delete all the pods in your default namespace:
+cloud_user@fas1c:~$ kubectl get pods
+NAME                     READY   STATUS    RESTARTS   AGE
+busybox                  1/1     Running   13         3d18h
+dns-example              1/1     Running   3          3d17h
+limited-pod              1/1     Running   1          16h
+nginx-7bb7cd8db5-2cbp2   1/1     Running   5          4d21h
+pref-6585cd5654-2rs44    1/1     Running   2          25h
+pref-6585cd5654-6s42c    1/1     Running   2          25h
+pref-6585cd5654-kl54x    1/1     Running   2          25h
+pref-6585cd5654-q86gl    1/1     Running   2          25h
+pref-6585cd5654-tvdd5    1/1     Running   2          25h
+resource-pod2            1/1     Running   1          16h
+
+cloud_user@fas1c:~$ kubectl delete pods --all
+
+# Шаг 6. Watch events as they are appearing in real time:
+cloud_user@fas1c:~$ kubectl get events -w
+
+# Шаг 7. View the logs from the scheduler pod:
+cloud_user@fas1c:~$ kubectl logs kube-scheduler-fas1c.mylabserver.com -n kube-system
+I0324 06:39:55.145245       1 serving.go:319] Generated self-signed cert in-memory
+W0324 06:39:55.819099       1 authentication.go:199] Error looking up in-cluster authentication configuration: Get https://172.31.110.22:6443/api/v1/namespaces/kube-system/configmaps/extension-apiserver-authentication: dial tcp 172.31.110.22:6443: connect: connection refused
+W0324 06:39:55.819134       1 authentication.go:200] Continuing without authentication configuration. This may treat all requests as anonymous.
+W0324 06:39:55.819141       1 authentication.go:201] To require authentication configuration lookup to succeed, set --authentication-tolerate-lookup-failure=false
+I0324 06:39:55.862189       1 server.go:148] Version: v1.16.6
+
+# Шаг 8. The location of a systemd service scheduler pod:
+Смотреть в файл /var/log/kube-scheduler.log, но у меня такого файла нет:
+
+cloud_user@fas1c:~$ ls /var/log/
+alternatives.log  apport.log.1  auth.log.1             cloud-init.log  dpkg.log        kern.log    lastlog  secure    syslog.2.gz          wtmp
+amazon            apt           btmp                   containers      fontconfig.log  kern.log.1  lxd      syslog    tallylog             {wtmp,lastlog,secure,auth.log,btmp}
+apport.log        auth.log      cloud-init-output.log  dist-upgrade    journal         landscape   pods     syslog.1  unattended-upgrades
+
+###############
+#Lab 1 : Scheduling Pods with Taints and Tolerations in Kubernetes#
+###############
+You have been given a three-node cluster. Within that cluster, you must perform the following tasks to taint the production node in order to repel work. You will create the necessary taint to properly label one of the nodes “prod.” Then you will deploy two pods — one to each environment. One pod spec will contain the toleration for the taint. You must perform the following tasks in order to complete this hands-on lab:
+	Taint one of the worker nodes to identify the prod environment.
+	Create the YAML spec for a pod that will be scheduled to the dev environment.
+	Create the YAML spec for a pod that will be scheduled to the prod environment.
+	Deploy each pod to their respective environments.
+	Verify each pod has been scheduled successfully to each environment.
+	
+# Шаг 1. Taint one of the worker nodes to repel work.
+	# Шаг 1.1 List out the nodes:
+	cloud_user@ip-10-0-1-101:~$ kubectl get nodes
+	NAME            STATUS   ROLES    AGE    VERSION
+	ip-10-0-1-101   Ready    master   142m   v1.13.3
+	ip-10-0-1-102   Ready    <none>   142m   v1.13.3
+	ip-10-0-1-103   Ready    <none>   142m   v1.13.3
+
+	# Шаг 1.2 Taint the node, replacing <NODE_NAME> with one of the worker node names returned in the previous command:
+	cloud_user@ip-10-0-1-101:~$ kubectl describe node ip-10-0-1-102 | grep Taints
+	Taints:             node-type=prod:NoSchedule
+
+# Шаг 2. Schedule a pod to the dev environment.
+	# Шаг 2.1 Create the dev-pod.yaml file:
+	cloud_user@ip-10-0-1-101:~$ vim dev-pod.yaml
+	
+	# Шаг 2.2 Enter the following YAML to specify a pod that will be scheduled to the dev environment:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dev-pod
+  labels:
+    app: busybox
+spec:
+  containers:
+  - name: dev
+    image: busybox
+    command: ['sh', '-c', 'echo Hello Kubernetes! && sleep 3600']
+		
+	# Шаг 2.3 Save and quit the file by pressing Escape followed by wq!.
+
+	# Шаг 2.4 Create the pod:
+	cloud_user@ip-10-0-1-101:~$ kubectl create -f dev-pod.yaml
+	pod/dev-pod created
+	cloud_user@ip-10-0-1-101:~$ kubectl get pods -o wide
+	NAME      READY   STATUS    RESTARTS   AGE   IP           NODE            NOMINATED NODE   READINESS GATES
+	dev-pod   1/1     Running   0          29s   10.244.1.2   ip-10-0-1-103   <none>           <none>
+
+# Шаг 3. Schedule a pod to the prod environment.
+	# Шаг 3.1 Create the prod-deployment.yaml file:
+	cloud_user@ip-10-0-1-101:~$ vim prod-deployment.yaml
+	
+	# Шаг 3.2 Enter the following YAML to specify a pod that will be scheduled to the prod environment:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prod
+  template:
+    metadata:
+      labels:
+        app: prod
+    spec:
+      containers:
+      - args:
+        - sleep
+        - "3600"
+        image: busybox
+        name: main
+      tolerations:
+      - key: node-type
+        operator: Equal
+        value: prod
+        effect: NoSchedule
+		
+	# Шаг 3.3 Save and quit the file by pressing Escape followed by wq!.
+
+	# Шаг 3.4 Create the pod:
+	cloud_user@ip-10-0-1-101:~$ kubectl create -f prod-deployment.yaml
+	deployment.apps/prod created
+	
+	cloud_user@ip-10-0-1-101:~$ kubectl get deploy
+	NAME   READY   UP-TO-DATE   AVAILABLE   AGE
+	prod   1/1     1            1           10s
+	
+	cloud_user@ip-10-0-1-101:~$ kubectl get rs
+	NAME              DESIRED   CURRENT   READY   AGE
+	prod-7654d444bc   1         1         1       16s
+	
+	cloud_user@ip-10-0-1-101:~$ kubectl get pods -o wide
+	NAME                    READY   STATUS    RESTARTS   AGE     IP           NODE            NOMINATED NODE   READINESS GATES
+	dev-pod                 1/1     Running   0          7m11s   10.244.1.2   ip-10-0-1-103   <none>           <none>
+	prod-7654d444bc-gngp6   1/1     Running   0          25s     10.244.1.3   ip-10-0-1-103   <none>           <none> # Под создан не там, где Taints: node-type=prod:NoSchedule
+	
+	cloud_user@ip-10-0-1-101:~$ kubectl describe pod prod-7654d444bc-gngp6
+	Tolerations: node-type=prod:NoSchedule
+                 node.kubernetes.io/not-ready:NoExecute for 300s
+                 node.kubernetes.io/unreachable:NoExecute for 300s
+
+
+# Шаг 4. Verify each pod has been scheduled to the correct environment.
+	# Шаг 4.1 Verify the pods have been scheduled:
+	cloud_user@ip-10-0-1-101:~$ kubectl get pods -o wide
+	NAME                    READY   STATUS    RESTARTS   AGE     IP           NODE            NOMINATED NODE   READINESS GATES
+	dev-pod                 1/1     Running   0          7m11s   10.244.1.2   ip-10-0-1-103   <none>           <none>
+	prod-7654d444bc-gngp6   1/1     Running   0          25s     10.244.1.3   ip-10-0-1-103   <none>           <none>
+	
+	# Шаг 4.2 Scale up the deployment:
+	cloud_user@ip-10-0-1-101:~$ kubectl scale deployment/prod --replicas=3
+	deployment.extensions/prod scaled
+
+	# Шаг 4.3 Look at our deployment again:
+	cloud_user@ip-10-0-1-101:~$ kubectl get pods -o wide
+	NAME                    READY   STATUS    RESTARTS   AGE     IP           NODE            NOMINATED NODE   READINESS GATES
+	dev-pod                 1/1     Running   0          9m4s    10.244.1.2   ip-10-0-1-103   <none>           <none>
+	prod-7654d444bc-f5n2w   1/1     Running   0          23s     10.244.2.3   ip-10-0-1-102   <none>           <none>
+	prod-7654d444bc-gngp6   1/1     Running   0          2m18s   10.244.1.3   ip-10-0-1-103   <none>           <none>
+	prod-7654d444bc-ts86x   1/1     Running   0          23s     10.244.2.2   ip-10-0-1-102   <none>           <none>
+
+	# Дополнительные поды созданы там, где Taints: node-type=prod:NoSchedule
+
+We should see that two more pods have been deployed.
