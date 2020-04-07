@@ -1,0 +1,112 @@
+###############
+#Course Introduction#
+###############
+Introduction
+	About the Course
+	About the Training Architect
+	About the Interactive Diagram
+	Course Features and Tools
+	Course Pre-Requisites
+
+Core Concepts (19%)
+	Understanding Kubernetes Architecture
+		Kubernetes Cluster Architecture
+		Kubernetes API Primitives
+		Kubernetes Services and Network Primitives
+	Hands-On Lab:
+		Exploring the Kubernetes Cluster via the Command Line
+
+Installation, Configuration, and Validation (12%)
+	Building the Kubernetes Cluster
+		Release Binaries, Provisioning, and Types of Clusters
+		Installing Kubernetes Master and Nodes
+		Building a Highly Available Kubernetes Cluster
+		Configuring Secure Cluster Communications
+		Running End-to-End Tests on Your Cluster
+	Hands-On Lab:
+		Installing and Testing the Components of a Kubernetes Cluster
+
+Cluster (11%)
+	Managing the Kubernetes Cluster
+		Upgrading the Kubernetes Cluster
+		Operating System Upgrades within a Kubernetes Cluster
+		Backing Up and Restoring a Kubernetes Cluster
+	Hands-On Lab:
+		Upgrading the Kubernetes Cluster Using kubeadm
+
+Networking (11%)
+	Cluster Communications
+		Pod and Node Networking
+		Container Network Interface (CNI)
+		Service Networking
+		Ingress Rules and Load Balancers
+		Cluster DNS
+	Hands-On Lab:
+		Creating a Service and Discovering DNS Names in Kubernetes
+
+Scheduling (5%)
+	Pod Scheduling within the Kubernetes Cluster
+		Configuring the Kubernetes Scheduler
+		Running Multiple Schedulers for Multiple Pods
+		Scheduling Pods with Resource Limits and Label Selectors
+		DaemonSets and Manually Scheduled Pods
+		Displaying Scheduler Events
+	Hands-On Lab:
+		Scheduling Pods with Taints and Tolerations in Kubernetes
+
+Application Lifecycle Management (8%)
+	Deploying Applications in the Kubernetes Cluster
+		Deploying an Application, Rolling Updates, and Rollbacks
+		Configuring an Application for High Availability and Scale
+		Creating a Self-Healing Application
+	Hands-On Lab:
+		Performing a Rolling Update of an Application in Kubernetes
+
+Storage (7%)
+	Managing Data in the Kubernetes Cluster
+		Persistent Volumes
+		Volume Access Modes
+		Persistent Volume Claims
+		Storage Objects
+		Applications with Persistent Storage
+	Hands-On Lab:
+		Creating Persistent Storage for Pods in Kubernetes
+
+Security (12%)
+	Securing the Kubernetes Cluster
+		Kubernetes Security Primitives
+		Cluster Authentication and Authorization
+		Configuring Network Policies
+		Creating TLS Certificates
+		Secure Images
+		Defining Security Contexts
+		Securing Persistent Key Value Store
+	Hands-On Lab:
+		Creating a ClusterRole to Access a PV in Kubernetes
+
+Logging and Monitoring (5%)
+	Monitoring Cluster Components
+		Monitoring the Cluster Components
+		Monitoring the Applications Running within a Cluster
+		Managing Cluster Component Logs
+		Managing Application Logs
+	Hands-On Lab:
+		Monitor and Output Logs to a File in Kubernetes
+
+Troubleshooting (10%)
+	Identifying Failure within the Kubernetes Cluster
+		Troubleshooting Application Failure
+		Troubleshooting Control Plane Failure
+		Troubleshooting Worker Node Failure
+		Troubleshooting Networking
+	Hands-On Lab:
+		Repairing Failed Pods in Kubernetes
+
+Practice Exam
+Hands-On Practice Exam
+	Hands-On Lab:
+		CKA Practice Exam: Part 1
+	Hands-On Lab:
+		CKA Practice Exam: Part 2
+	Hands-On Lab:
+		CKA Practice Exam: Part 3

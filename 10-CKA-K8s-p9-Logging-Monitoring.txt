@@ -1,0 +1,393 @@
+						Monitoring Cluster Components
+###############
+#Monitoring the Cluster Components#
+###############
+# Материалы:
+# https://kubernetes.io/docs/tasks/debug-application-cluster/monitor-node-health/
+# https://kubernetes.io/docs/tasks/debug-application-cluster/resource-usage-monitoring/
+
+# We’ll install the metrics server and see how the kubectl top command works.
+
+# Шаг 1. Clone the metrics server repository:
+cloud_user@fas1c:~$ git clone https://github.com/linuxacademy/metrics-server
+
+# Шаг 2. Install the metrics server in your cluster:
+cloud_user@fas1c:~$ ls metrics-server/
+CONTRIBUTING.md  Gopkg.toml  Makefile  OWNERS_ALIASES  SECURITY_CONTACTS  code-of-conduct.md  hack  vendor
+Gopkg.lock       LICENSE     OWNERS    README.md       cmd                deploy              pkg   version
+
+cloud_user@fas1c:~$ ls metrics-server/deploy/
+1.7  1.8+  docker
+
+cloud_user@fas1c:~$ vim /home/cloud_user/metrics-server/deploy/1.8+/metrics-server-deployment.yaml
+#Update to deployment apiVersion: apps/v1
+
+cloud_user@fas1c:~$ kubectl apply -f ~/metrics-server/deploy/1.8+/
+
+# Шаг 3. Get a response from the metrics server API:
+cloud_user@fas1c:~$ kubectl get --raw /apis/metrics.k8s.io/
+{"kind":"APIGroup","apiVersion":"v1","name":"metrics.k8s.io","versions":[{"groupVersion":"metrics.k8s.io/v1beta1","version":"v1beta1"}],"preferredVersion":{"groupVersion":"metrics.k8s.io/v1beta1","version":"v1beta1"}}
+
+# Шаг 4. Get the CPU and memory utilization of the nodes in your cluster:
+cloud_user@fas1c:~$ kubectl top node
+NAME                           CPU(cores)   CPU%   MEMORY(bytes)   MEMORY%
+fas1c.mylabserver.com   1847m        92%    1164Mi          62%
+fas2c.mylabserver.com   189m         9%     901Mi           48%
+fas3c.mylabserver.com   715m         35%    908Mi           48%
+
+# Шаг 5. Get the CPU and memory utilization of the pods in your cluster:
+cloud_user@fas1c:~$ kubectl top pods
+NAME                         CPU(cores)   MEMORY(bytes)
+alpine-nonroot               0m           0Mi
+alpine-user-context          0m           0Mi
+busybox                      0m           0Mi
+configmap-pod                0m           0Mi
+configmap-volume-pod         0m           0Mi
+example-https                1m           8Mi
+
+# Шаг 6. Get the CPU and memory of pods in all namespaces:
+cloud_user@fas1c:~$ kubectl top pods --all-namespaces
+NAMESPACE     NAME                                                   CPU(cores)   MEMORY(bytes)
+default       alpine-nonroot                                         0m           0Mi
+default       alpine-user-context                                    0m           0Mi
+default       busybox                                                0m           0Mi
+
+# Шаг 7. Get the CPU and memory of pods in only one namespace:
+cloud_user@fas1c:~$ kubectl top pods -n kube-system
+NAME                                                   CPU(cores)   MEMORY(bytes)
+canal-fptxg                                            22m          57Mi
+canal-htfhs                                            28m          59Mi
+
+# Шаг 8. Get the CPU and memory of pods with a label selector (посмотреть загруженность пода по label):
+cloud_user@fas1c:~$ kubectl top pod -l run=pod-with-defaults
+
+# Шаг 9. Get the CPU and memory of a specific pod:
+cloud_user@fas1c:~$ kubectl top pod pod-with-defaults
+
+# Шаг 10. Get the CPU and memory of the containers inside the pod (посмотреть загруженность контейнеров):
+cloud_user@fas1c:~$ kubectl get pods | grep context
+group-context                2/2     Running                      2          29h
+
+cloud_user@fas1c:~$ kubectl top pods group-context --containers
+POD             NAME     CPU(cores)   MEMORY(bytes)
+group-context   first    0m           0Mi
+group-context   second   0m           0Mi
+
+###############
+#Monitoring the Applications Running within a Cluster#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes
+
+# You can insert liveness probes and readiness probes to do just this for custom monitoring of your applications.
+
+# Шаг 1. The pod YAML for a liveness probe (Просто пример, создавать не нужно):
+apiVersion: v1
+kind: Pod
+metadata:
+  name: liveness
+spec:
+  containers:
+  - image: linuxacademycontent/kubeserve
+    name: kubeserve
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 80
+
+# Шаг 2. The YAML for a service and two pods with readiness probes:
+cloud_user@fas1c:~$ vim readiness.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-fas
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: nginx
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-fas
+  labels:
+    app: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 5
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginxpd-fas
+  labels:
+    app: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx:191
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 5
+
+# Шаг 3. Create the service and two pods with readiness probes:
+cloud_user@fas1c:~$ kubectl apply -f readiness.yaml
+service/nginx-fas created
+pod/nginx-fas created
+pod/nginxpd-fas created
+
+# Шаг 4. Check if the readiness check passed or failed:
+cloud_user@fas1c:~$ kubectl get pods | grep fas
+nginx-fas                    1/1     Running                      0          38s
+nginxpd-fas                  0/1     ErrImagePull                 0          38s # Один под запустился с ошибкой
+
+cloud_user@fas1c:~$ kubectl get service | grep fas
+nginx-fas    LoadBalancer   10.102.20.218    <pending>     80:30144/TCP   53s
+
+# Шаг 5. Check if the failed pod has been added to the list of endpoints:
+cloud_user@fas1c:~$ kubectl get ep
+NAME         ENDPOINTS                                      AGE
+nginx-fas    10.244.1.56:80                                 84s # Создалась только одна сущность
+
+# Шаг 6. Edit the pod to fix the problem and enter it back into the service (исправляем под nginxpd-fas):
+cloud_user@fas1c:~$ kubectl edit pod nginxpd-fas
+spec:
+  containers:
+  - image: nginx # Удаляем 191 версию image
+    imagePullPolicy: IfNotPresent
+    name: nginx
+
+# Шаг 7. Get the list of endpoints to see that the repaired pod is part of the service again:
+cloud_user@fas1c:~$ kubectl get pods | grep fas
+nginx-fas                    1/1     Running                      0          11m
+nginxpd-fas                  1/1     Running                      0          11m # Под восстановился
+
+cloud_user@fas1c:~$ kubectl get ep | grep fas
+nginx-fas    10.244.1.56:80,10.244.2.60:80                  13m # Добавился ip-адрес второго пода
+
+###############
+#Managing Cluster Component Logs#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/cluster-administration/logging/
+
+# We’ll go through a few different approaches to organizing your logs.
+
+# Шаг 1. 
+# The directory where the container logs reside: /var/log/containers
+cloud_user@fas1c:~$ ls /var/log/containers
+canal-w9jm8_kube-system_calico-node-1ba1b864d703a4a30d9dac1b1ed3c3b017f89c824850c6e0234570a832c9ffe6.log
+canal-w9jm8_kube-system_calico-node-eb87574a725efdb116a7876ed42b78bbddeff2a9d0790f1645b17c15d4cce31d.log
+canal-w9jm8_kube-system_flexvol-driver-97a4bda9348f27a4218d1eafe1548ff8aa3f94451a65df1de3fa6e1fac5ee41a.log
+canal-w9jm8_kube-system_install-cni-bd725567d775fad72e867cc16dc6f1e2b921fd916fde206117bd34bd8a603e71.log
+
+# The directory where kubelet stores its logs: /var/log
+cloud_user@fas1c:~$ ls /var/log/
+alternatives.log  auth.log               cloud-init.log  journal        lastlog  syslog.1     tallylog
+amazon            auth.log.1             containers      kern.log       lxd      syslog.2.gz  unattended-upgrades
+apport.log        auth.log.2.gz          dist-upgrade    kern.log.1     pods     syslog.3.gz  wtmp
+apport.log.1      btmp                   dpkg.log        kern.log.2.gz  secure   syslog.4.gz  {wtmp,lastlog,secure,auth.log,btmp}
+apt               cloud-init-output.log  fontconfig.log  landscape      syslog   syslog.5.gz
+
+##### Подход 1. Пишем разные логи контейнера в разные файлы #####
+# Шаг 2. The YAML for a pod that has two different log streams:
+cloud_user@fas1c:~$ vim twolog.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: counter
+spec:
+  containers:
+  - name: count
+    image: busybox
+    args:
+    - /bin/sh
+    - -c
+    - >
+      i=0;
+      while true;
+      do
+        echo "$i: $(date)" >> /var/log/1.log; # Тип логов 1
+        echo "$(date) INFO $i" >> /var/log/2.log; # Тип логов 2
+        i=$((i+1));
+        sleep 1;
+      done
+    volumeMounts:
+    - name: varlog
+      mountPath: /var/log
+  volumes:
+  - name: varlog
+    emptyDir: {}
+
+# Шаг 3. Create a pod that has two different log streams to the same directory:
+cloud_user@fas1c:~$ kubectl apply -f twolog.yaml
+pod/counter created
+
+# Шаг 4. View the logs in the /var/log directory of the container:
+cloud_user@fas1c:~$ kubectl exec counter -- ls /var/log
+1.log
+2.log
+
+##### Подход 2. Создаем специальные контейнеры для сбора логов основного контейнера (подключаем к одному тому) #####
+# Шаг 5. The YAML for a sidecar container that will tail the logs for each type:
+cloud_user@fas1c:~$ kubectl delete pod counter
+pod "counter" deleted
+
+cloud_user@fas1c:~$ vim sidecar.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: counter
+spec:
+  containers:
+  - name: count
+    image: busybox
+    args:
+    - /bin/sh
+    - -c
+    - >
+      i=0;
+      while true;
+      do
+        echo "$i: $(date)" >> /var/log/1.log; # Тип логов 1
+        echo "$(date) INFO $i" >> /var/log/2.log; # # Тип логов 2
+        i=$((i+1));
+        sleep 1;
+      done
+    volumeMounts:
+    - name: varlog
+      mountPath: /var/log
+  - name: count-log-1
+    image: busybox
+    args: [/bin/sh, -c, 'tail -n+1 -f /var/log/1.log']
+    volumeMounts:
+    - name: varlog
+      mountPath: /var/log
+  - name: count-log-2
+    image: busybox
+    args: [/bin/sh, -c, 'tail -n+1 -f /var/log/2.log']
+    volumeMounts:
+    - name: varlog
+      mountPath: /var/log
+  volumes:
+  - name: varlog
+    emptyDir: {}
+	
+cloud_user@fas1c:~$ kubectl apply -f sidecar.yaml
+pod/counter created
+
+# Шаг 6. View the first type of logs separately:
+cloud_user@fas1c:~$ kubectl logs counter count-log-1
+0: Wed Apr  1 13:22:34 UTC 2020
+1: Wed Apr  1 13:22:35 UTC 2020
+2: Wed Apr  1 13:22:36 UTC 2020
+3: Wed Apr  1 13:22:37 UTC 2020
+
+# Шаг 7. View the second type of logs separately:
+cloud_user@fas1c:~$ kubectl logs counter count-log-2
+Wed Apr  1 13:22:34 UTC 2020 INFO 0
+Wed Apr  1 13:22:35 UTC 2020 INFO 1
+Wed Apr  1 13:22:36 UTC 2020 INFO 2
+Wed Apr  1 13:22:37 UTC 2020 INFO 3
+Wed Apr  1 13:22:38 UTC 2020 INFO 4
+
+###############
+#Managing Application Logs#
+###############
+# Материалы:
+# https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#logs
+
+# Containerized applications usually write their logs to standard out and standard error instead of writing their logs to files. Docker then redirects those streams to files. You can retrieve those files with the kubectl logs command in Kubernetes. 
+
+# Get the logs from a pod:
+kubectl logs nginx
+
+# Get the logs from a specific container on a pod:
+kubectl logs counter -c count-log-1
+
+# Get the logs from all containers on the pod:
+kubectl logs counter --all-containers=true
+
+# Get the logs from containers with a certain label:
+kubectl logs -lapp=nginx
+
+# Get the logs from a previously terminated container within a pod:
+kubectl logs -p -c nginx nginx
+
+# Stream the logs from a container in a pod:
+kubectl logs -f -c count-log-1 counter
+
+#Tail the logs to only view a certain number of lines:
+kubectl logs --tail=20 nginx
+
+# View the logs from a previous time duration:
+kubectl logs --since=1h nginx
+
+# View the logs from a container within a pod within a deployment:
+kubectl logs deployment/nginx -c nginx
+
+# Redirect the output of the logs to a file:
+kubectl logs counter -c count-log-1 > count.log
+
+###############
+#Lab 1: Monitor and Output Logs to a File in Kubernetes#
+###############
+# Задача:
+# Within that cluster, you must discover the pod that isn’t running as it should. Then, you must collect the logs and save them to a file in order to capture the problematic messages from the log. 
+
+# Шаг 1. Identify the problematic pod in your cluster.
+	Use the following command to view all the pods in your cluster:
+		kubectl get pods --all-namespaces
+		
+cloud_user@ip-10-0-1-101:~$ kubectl get pods --all-namespaces
+NAMESPACE     NAME                                    READY   STATUS             RESTARTS   AGE
+default       pod1                                    1/1     Running            0          6m16s
+default       pod2                                    1/1     Running            0          6m16s
+internal      pod3                                    1/1     Running            0          6m15s
+kube-system   coredns-54ff9cd656-tn7z9                1/1     Running            0          6m23s
+kube-system   coredns-54ff9cd656-x7pkh                1/1     Running            0          6m23s
+kube-system   etcd-ip-10-0-1-101                      1/1     Running            0          5m36s
+kube-system   kube-apiserver-ip-10-0-1-101            1/1     Running            0          5m25s
+kube-system   kube-controller-manager-ip-10-0-1-101   1/1     Running            0          5m44s
+kube-system   kube-flannel-ds-amd64-gnfxh             1/1     Running            0          6m16s
+kube-system   kube-flannel-ds-amd64-qrfkt             1/1     Running            0          6m16s
+kube-system   kube-flannel-ds-amd64-r78mr             1/1     Running            0          6m16s
+kube-system   kube-proxy-62h2w                        1/1     Running            0          6m18s
+kube-system   kube-proxy-l87qf                        1/1     Running            0          6m23s
+kube-system   kube-proxy-mxd87                        1/1     Running            0          6m19s
+kube-system   kube-scheduler-ip-10-0-1-101            1/1     Running            0          5m38s
+kube-system   metrics-server-6447c7cf8c-rl6g8         1/1     Running            0          6m11s
+web           pod4                                    0/1     CrashLoopBackOff   6          6m15s # Проблемная нода
+web           pod5                                    2/2     Running            0          6m15s
+web           ws                                      2/2     Running            0          6m15s
+
+
+# Шаг 2. Collect the logs from the pod.
+	Use the following command to collect the logs from the pod:
+		kubectl logs <pod_name> -n <namespace_name>
+		
+cloud_user@ip-10-0-1-101:~$ kubectl logs pod4 -n web
+10.244.2.1 - - [02/Apr/2020:10:54:07 +0000] "GET /ealthz HTTP/1.1" 404 153 "-" "kube-probe/1.13"
+2020/04/02 10:54:07 [error] 6#6: *1 open() "/etc/nginx/html/ealthz" failed (2: No such file or directory), client: 10.244.2.1, server: , request: "GET /ealthz HTTP/1.1", host: "10.244.2.7:8081"
+2020/04/02 10:54:12 [error] 6#6: *2 open() "/etc/nginx/html/ealthz" failed (2: No such file or directory), client: 10.244.2.1, server: , request: "GET /ealthz HTTP/1.1", host: "10.244.2.7:8081"
+10.244.2.1 - - [02/Apr/2020:10:54:12 +0000] "GET /ealthz HTTP/1.1" 404 153 "-" "kube-probe/1.13"
+2020/04/02 10:54:17 [error] 6#6: *3 open() "/etc/nginx/html/ealthz" failed (2: No such file or directory), client: 10.244.2.1, server: , request: "GET /ealthz HTTP/1.1", host: "10.244.2.7:8081"
+10.244.2.1 - - [02/Apr/2020:10:54:17 +0000] "GET /ealthz HTTP/1.1" 404 153 "-" "kube-probe/1.13"
+
+
+# Шаг 3. Output the logs to a file.
+	Use the following command to output the logs to a file:
+		kubectl logs <pod_name> -n <namespace_name> > broken-pod.log

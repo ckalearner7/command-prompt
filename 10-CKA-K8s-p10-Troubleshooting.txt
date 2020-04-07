@@ -1,0 +1,426 @@
+						Identifying Failure within the Kubernetes Cluster
+###############
+#Troubleshooting Application Failure#
+###############
+# Материалы:
+# https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+# https://kubernetes.io/docs/tasks/debug-application-cluster/determine-reason-pod-failure/
+# https://kubernetes.io/docs/tasks/debug-application-cluster/debug-application-introspection/
+# https://kubernetes.io/docs/tasks/debug-application-cluster/debug-application/
+# https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/
+
+##### Случай 1. Использование terminationMessagePath #####
+# Шаг 1. The YAML for a pod with a termination reason:
+cloud_user@fas1c:~$ vim pod2ts.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod2ts
+spec:
+  containers:
+  - image: busybox
+    name: main
+    command:
+    - sh
+    - -c
+    - 'echo "I''ve had enough" > /var/termination-reason ; exit 1'
+    terminationMessagePath: /var/termination-reason # в эту директорию будут записываться сообщения, когда произойдет termination
+	
+cloud_user@fas1c:~$ kubectl apply -f pod2ts.yaml
+pod/pod2ts created
+
+    Command:
+      sh
+      -c
+      echo "I've had enough" > /var/termination-reason ; exit 1
+    State:       Waiting
+      Reason:    CrashLoopBackOff
+    Last State:  Terminated
+      Reason:    Error
+      Message:   I've had enough # Вывод сообщения
+
+# Шаг 2. One of the first steps in troubleshooting is usually to describe the pod:
+cloud_user@fas1c:~$ kubectl describe po pod2ts
+
+##### Случай 2. Использование liveness #####
+# Шаг 1. The YAML for a liveness probe that checks for pod health:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: liveness
+spec:
+  containers:
+  - image: linuxacademycontent/candy-service:2
+    name: kubeserve
+    livenessProbe:
+      httpGet:
+        path: /healthz # тут может быть / , нужно читать документацию
+        port: 8081
+		
+# liveness отслеживает состояние пода
+
+##### Случай 3. Просмотр логов #####
+# Шаг 1. View the logs for additional detail:
+kubectl logs pod-with-defaults
+
+##### Случай 4. Экспорт YAML-конфигурации и оздание нового пода с ее помощью #####
+# Шаг 1. Export the YAML of a running pod, in the case that you are unable to edit it directly:
+kubectl get po pod-with-defaults -o yaml --export > defaults-pod.yaml
+
+# В примере под уснул, так как в нем применяется команда sleep через некоторое время, которое уже закончилось
+
+##### Случай 5. Редактируем под, если это возможно (замена image, например) #####
+# Шаг 1. Edit a pod directly (i.e., changing the image):
+kubectl edit po nginx
+
+# Возможно, появится сообщение, что тот или иной параметр нельзя менять. Тогда можно использовать трюк из случая 4:  --export > defaults-pod.yaml
+
+###############
+#Troubleshooting Control Plane Failure#
+###############
+# Материалы:
+# https://kubernetes.io/docs/tasks/debug-application-cluster/debug-cluster/#a-general-overview-of-cluster-failure-modes
+# https://kubernetes.io/docs/tasks/administer-cluster/highly-available-master/
+
+# If your Control Plane components are not effectively communicating, there are a few things you can check to ensure your cluster is operating efficiently.
+
+##### Алгоритм поиска проблемы с компонентами кластера ######
+# Шаг 1. Check the events in the kube-system namespace for errors:
+kubectl get events -n kube-system
+
+# Шаг 2. Get the logs from the individual pods in your kube-system namespace and check for errors:
+kubectl logs [kube_scheduler_pod_name] -n kube-system
+
+# Шаг 3. Check the status of the Docker service:
+sudo systemctl status docker
+
+# Шаг 4. Start up and enable the Docker service, so it starts upon bootup:
+sudo systemctl enable docker && systemctl start docker
+
+# Шаг 5. Check the status of the kubelet service:
+sudo systemctl status kubelet
+
+# Шаг 6. Start up and enable the kubelet service, so it starts up when the machine is rebooted:
+sudo systemctl enable kubelet && systemctl start kubelet
+
+# Шаг 7. Turn off swap on your machine:
+sudo su -
+swapoff -a && sed -i '/ swap / s/^/#/' /etc/fstab
+
+# Шаг 8. Check if you have a firewall running:
+sudo systemctl status firewalld
+
+# Шаг 9. Disable the firewall and stop the firewalld service:
+sudo systemctl disable firewalld && systemctl stop firewalld
+
+###############
+#Troubleshooting Worker Node Failure#
+###############
+# Материалы:
+# https://kubernetes.io/docs/concepts/architecture/nodes/
+# https://kubernetes.io/docs/tutorials/kubernetes-basics/explore/explore-intro/#nodes
+
+##### Алгоритм поиска проблемы на ноде ######
+# Шаг 1. Listing the status of the nodes should be the first step:
+kubectl get nodes
+
+# Шаг 2. Find out more information about the nodes with kubectl describe:
+kubectl describe nodes chadcrowell2c.mylabserver.com
+
+# Шаг 3. You can try to log in to your server via SSH:
+ssh chadcrowell2c.mylabserver.com
+
+# Шаг 4. Get the IP address of your nodes:
+kubectl get nodes -o wide
+
+# Шаг 5. Use the IP address to further probe the server:
+ssh cloud_user@172.31.29.182
+
+# Шаг 6. Generate a new token after spinning up a new server (на мастере):
+sudo kubeadm token generate
+
+# Шаг 7. Create the kubeadm join command for your new worker node (на мастере):
+sudo kubeadm token create [token_name] --ttl 2h --print-join-command
+
+# Шаг 8. View the journalctl logs (журнал службы kubelet):
+sudo journalctl -u kubelet 
+
+# Шаг 9. View the syslogs:
+sudo more syslog | tail -120 | grep kubelet
+
+###############
+#Troubleshooting Networking#
+###############
+# Материалы:
+# https://kubernetes.io/docs/tasks/debug-application-cluster/debug-service/
+# https://kubernetes.io/docs/tasks/access-application-cluster/port-forward-access-application-cluster/
+# https://kubernetes.io/docs/tasks/debug-application-cluster/troubleshooting/
+# https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/#pod-network
+
+##### Проверка настроек DNS (взаимодействие между подами)#####
+# Шаг 1. Run a deployment using the container port 9376 and with three replicas:
+kubectl run hostnames --image=k8s.gcr.io/serve_hostname \
+                        --labels=app=hostnames \
+                        --port=9376 \
+                        --replicas=3
+						
+cloud_user@fas1c:~$ kubectl get deploy | grep host
+hostnames   3/3     3            3           2m18s
+
+# Шаг 2. List the services in your cluster:
+cloud_user@fas1c:~$ kubectl get services
+NAME         TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+kubernetes   ClusterIP      10.96.0.1        <none>        443/TCP        15d
+
+# Шаг 3. Create a service by exposing a port on the deployment:
+cloud_user@fas1c:~$ kubectl expose deployment hostnames --port=80 --target-port=9376
+service/hostnames exposed
+
+cloud_user@fas1c:~$ kubectl get services
+NAME         TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)        AGE
+hostnames    ClusterIP      10.108.54.182    <none>        80/TCP         4s
+kubernetes   ClusterIP      10.96.0.1        <none>        443/TCP        15d
+
+# Шаг 4. Run an interactive busybox pod:
+cloud_user@fas1c:~$ kubectl run -it --rm --restart=Never busyboxts --image=busybox:1.28 sh
+If you don't see a command prompt, try pressing enter.
+/ #
+
+# Шаг 5. From the pod, check if DNS is resolving hostnames (команда - nslookup hostnames в busyboxts):
+cloud_user@fas1c:~$ kubectl run -it --rm --restart=Never busyboxts --image=busybox:1.28 sh
+If you don't see a command prompt, try pressing enter.
+/ # nslookup hostnames
+Server:    10.96.0.10 # busyboxts сервер 10.96.0.10 в качестве DNS. Это можно посмотреть в /etc/resolv.conf
+Address 1: 10.96.0.10 kube-dns.kube-system.svc.cluster.local
+
+Name:      hostnames
+Address 1: 10.108.54.182 hostnames.default.svc.cluster.local # Выдает IP нашего сервиса  запросе nslookup hostnames
+
+# Шаг 6. From the pod, cat out the /etc/resolv.conf file (в busyboxts):
+/ # cat /etc/resolv.conf
+nameserver 10.96.0.10 # DNS сервер для busyboxts по умолчанию
+search default.svc.cluster.local svc.cluster.local cluster.local us-west-2.compute.internal
+options ndots:5
+
+# Шаг 7. From the pod, look up the DNS name of the Kubernetes service:
+/ # nslookup kubernetes.default
+Server:    10.96.0.10
+Address 1: 10.96.0.10 kube-dns.kube-system.svc.cluster.local
+
+Name:      kubernetes.default
+Address 1: 10.96.0.1 kubernetes.default.svc.cluster.local
+
+##### Проверка настроек Service #####
+# Шаг 8. Get the JSON output of your service:
+cloud_user@fas1c:~$ kubectl get svc hostnames -o json
+{
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+        "creationTimestamp": "2020-04-03T07:47:54Z",
+        "labels": {
+            "app": "hostnames"
+        },
+        "name": "hostnames",
+        "namespace": "default",
+        "resourceVersion": "468548",
+        "selfLink": "/api/v1/namespaces/default/services/hostnames",
+        "uid": "755d0bf3-e90a-4ea2-b11c-35b8596c8003"
+    },
+    "spec": {
+        "clusterIP": "10.108.54.182",
+        "ports": [
+            {
+                "port": 80,
+                "protocol": "TCP",	# проверяем протокол
+                "targetPort": 9376 # проверяем порты контейнера
+            }
+        ],
+        "selector": {
+            "app": "hostnames"
+        },
+        "sessionAffinity": "None",
+        "type": "ClusterIP"
+    },
+    "status": {
+        "loadBalancer": {}
+    }
+}
+
+##### Проверка взаимодействия с подом #####
+# Шаг 9. View the endpoints for your service:
+cloud_user@fas1c:~$ kubectl get ep
+NAME         ENDPOINTS                                            AGE
+hostnames    10.244.1.97:9376,10.244.2.94:9376,10.244.2.95:9376   22m # В deployment было три реплики - здесь есть три IP-адреса
+kubernetes   172.31.110.22:6443                                   15d
+
+# Шаг 10. Communicate with the pod directly:
+cloud_user@fas1c:~$ kubectl get pods -o wide | grep host
+hostnames-5db5477647-24czw   1/1     Running   1          2d23h   10.244.2.134   fas3c.mylabserver.com   <none>           <none>
+hostnames-5db5477647-j7zvr   1/1     Running   1          2d23h   10.244.2.123   fas3c.mylabserver.com   <none>           <none>
+hostnames-5db5477647-jsb4j   1/1     Running   1          2d23h   10.244.2.136   fas3c.mylabserver.com   <none>           <none>
+
+cloud_user@fas1c:~$ wget -qO- 10.244.2.134:9376
+hostnames-5db5477647-24czw
+
+# -q --quiet выключить сообщения Wget
+# -O чтобы загружаемые документы шли в стандартный вывод
+
+##### Проверка kube-proxy и iptables #####
+# Шаг 11. Check if kube-proxy is running on the nodes:
+cloud_user@fas1c:~$ ps auxw | grep kube-proxy
+root      3296  0.0  1.5 139620 30372 ?        Ssl  10:00   0:10 /usr/local/bin/kube-proxy --config=/var/lib/kube-proxy/config.conf --hostname-override=fas1c.mylabserver.com
+cloud_u+ 14557  0.0  0.0  14856  1148 pts/0    R+   14:21   0:00 grep --color=auto kube-proxy
+
+# Шаг 12. Check if kube-proxy is writing iptables:
+cloud_user@fas1c:~$ sudo iptables-save | grep hostnames
+[sudo] password for cloud_user:
+-A KUBE-SERVICES ! -s 10.244.0.0/16 -d 10.108.54.182/32 -p tcp -m comment --comment "default/hostnames: cluster IP" -m tcp --dport 80 -j KUBE-MARK-MASQ
+-A KUBE-SERVICES -d 10.108.54.182/32 -p tcp -m comment --comment "default/hostnames: cluster IP" -m tcp --dport 80 -j KUBE-SVC-NWV5X2332I4OT4T3
+
+# Шаг 13. View the list of kube-system pods:
+cloud_user@fas1c:~$ kubectl get pods -n kube-system
+NAME                                                   READY   STATUS    RESTARTS   AGE
+canal-fptxg                                            2/2     Running   14         10d
+canal-htfhs                                            2/2     Running   16         10d
+canal-w9jm8                                            2/2     Running   18         10d
+coredns-5644d7b6d9-hd88r                               1/1     Running   19         18d
+coredns-5644d7b6d9-p78dn                               1/1     Running   1          3d
+etcd-fas1c.mylabserver.com                      1/1     Running   19         18d
+kube-apiserver-fas1c.mylabserver.com            1/1     Running   23         18d
+kube-controller-manager-fas1c.mylabserver.com   1/1     Running   19         18d
+kube-flannel-ds-amd64-cjzgs                            1/1     Running   28         19d
+kube-flannel-ds-amd64-n9q98                            1/1     Running   31         19d
+kube-flannel-ds-amd64-p5267                            1/1     Running   23         18d
+kube-proxy-44wtt                                       1/1     Running   20         18d
+kube-proxy-4vnpl                                       1/1     Running   12         13d
+kube-proxy-v4vdb                                       1/1     Running   19         18d
+kube-scheduler-fas1c.mylabserver.com            1/1     Running   19         18d
+metrics-server-f76f648c7-5hd7d                         1/1     Running   1          3d
+my-scheduler-789cb54bc9-l565j                          1/1     Running   1          3d
+
+# Шаг 14. Connect to your kube-proxy pod in the kube-system namespace:
+cloud_user@fas1c:~$ kubectl exec -it kube-proxy-4vnpl -n kube-system -- sh
+# sudo iptables-save | grep hostnames
+sh: 1: sudo: not found
+# iptables-save | grep hostnames
+-A KUBE-SERVICES ! -s 10.244.0.0/16 -d 10.108.54.182/32 -p tcp -m comment --comment "default/hostnames: cluster IP" -m tcp --dport 80 -j KUBE-MARK-MASQ
+-A KUBE-SERVICES -d 10.108.54.182/32 -p tcp -m comment --comment "default/hostnames: cluster IP" -m tcp --dport 80 -j KUBE-SVC-NWV5X2332I4OT4T3
+
+##### Проверка CNI #####
+# В этом примере меняем Flannel на Weave Net
+# Шаг 15. Delete the flannel CNI plugin:
+kubectl delete -f https://raw.githubusercontent.com/coreos/flannel/bc79dd1505b0c8681ece4de4c0d86c5cd2643275/Documentation/kube-flannel.yml
+
+# Шаг 16. Apply the Weave Net CNI plugin:
+kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
+
+###############
+#Lab 1: Repairing Failed Pods in Kubernetes#
+###############
+# Being able to identify the issue and quickly fix the pods is essential to maintaining uptime for your applications running in Kubernetes.
+
+# Шаг 1. Identify the broken pods. Use the following command to see what’s in the cluster:
+kubectl get all --all-namespaces
+
+# Шаг 2. Find out why the pods are broken. Use the following command to inspect the pod and view the events:
+kubectl describe pod <pod_name>
+
+# Шаг 3. Repair the broken pods.
+	# Шаг 3.1. Use the following command to repair the broken pods in the most efficient manner:
+		kubectl edit deploy nginx -n web
+
+	# Шаг 3.2. Where it says image: nginx:191, change it to image: nginx. Save and exit.
+
+	# Шаг 3.3. Verify the repair is complete:
+		kubectl get po -n web
+ 
+	# Шаг 3.4. See the new replica set (появится новый ReplicaSet):
+	kubectl get rs -n web
+
+# Шаг 4. Ensure pod health by accessing the pod directly.
+	# Шаг 4.1. List the pods including the IP addresses:
+		kubectl get po -n web -o wide
+
+	# Шаг 4.2. Start a busybox pod:
+		kubectl run busybox --image=busybox --rm -it --restart=Never -- sh
+
+	# Шаг 4.3. Use the following command to access the pod directly via its container port, replacing POD_IP_ADDRESS with an appropriate pod IP:
+		wget -qO- POD_IP_ADDRESS:80
+
+##### Выводы #####
+# Шагу 1. 		
+cloud_user@ip-10-0-1-101:~$ kubectl get all --all-namespaces
+NAMESPACE     NAME                                        READY   STATUS             RESTARTS   AGE
+kube-system   pod/coredns-54ff9cd656-fm967                1/1     Running            0          51m
+kube-system   pod/coredns-54ff9cd656-xswb2                1/1     Running            0          51m
+kube-system   pod/etcd-ip-10-0-1-101                      1/1     Running            0          50m
+kube-system   pod/kube-apiserver-ip-10-0-1-101            1/1     Running            0          50m
+kube-system   pod/kube-controller-manager-ip-10-0-1-101   1/1     Running            0          50m
+kube-system   pod/kube-flannel-ds-amd64-2k86c             1/1     Running            0          51m
+kube-system   pod/kube-flannel-ds-amd64-pppmt             1/1     Running            0          51m
+kube-system   pod/kube-flannel-ds-amd64-rcm6d             1/1     Running            0          51m
+kube-system   pod/kube-proxy-47bbh                        1/1     Running            0          51m
+kube-system   pod/kube-proxy-7h2z7                        1/1     Running            0          51m
+kube-system   pod/kube-proxy-fmmrs                        1/1     Running            0          51m
+kube-system   pod/kube-scheduler-ip-10-0-1-101            1/1     Running            0          50m
+web           pod/nginx-856876659f-9k79d                  0/1     ImagePullBackOff   0          51m
+web           pod/nginx-856876659f-f9bxv                  0/1     ImagePullBackOff   0          51m
+web           pod/nginx-856876659f-kbffl                  0/1     ImagePullBackOff   0          51m
+web           pod/nginx-856876659f-knvtj                  0/1     ImagePullBackOff   0          51m
+web           pod/nginx-856876659f-qmdgz                  0/1     ImagePullBackOff   0          51m
+
+NAMESPACE     NAME                 TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)         AGE
+default       service/kubernetes   ClusterIP   10.96.0.1    <none>        443/TCP         51m
+kube-system   service/kube-dns     ClusterIP   10.96.0.10   <none>        53/UDP,53/TCP   51m
+
+NAMESPACE     NAME                                     DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR                     AGE
+kube-system   daemonset.apps/kube-flannel-ds-amd64     3         3         3       3            3           beta.kubernetes.io/arch=amd64     51m
+kube-system   daemonset.apps/kube-flannel-ds-arm       0         0         0       0            0           beta.kubernetes.io/arch=arm       51m
+kube-system   daemonset.apps/kube-flannel-ds-arm64     0         0         0       0            0           beta.kubernetes.io/arch=arm64     51m
+kube-system   daemonset.apps/kube-flannel-ds-ppc64le   0         0         0       0            0           beta.kubernetes.io/arch=ppc64le   51m
+kube-system   daemonset.apps/kube-flannel-ds-s390x     0         0         0       0            0           beta.kubernetes.io/arch=s390x     51m
+kube-system   daemonset.apps/kube-proxy                3         3         3       3            3           <none>                            51m
+
+NAMESPACE     NAME                      READY   UP-TO-DATE   AVAILABLE   AGE
+kube-system   deployment.apps/coredns   2/2     2            2           51m
+web           deployment.apps/nginx     0/5     5            0           51m
+
+NAMESPACE     NAME                                 DESIRED   CURRENT   READY   AGE
+kube-system   replicaset.apps/coredns-54ff9cd656   2         2         2       51m
+web           replicaset.apps/nginx-856876659f     5         5         0       51m
+
+# Шагу 2.
+cloud_user@ip-10-0-1-101:~$ kubectl describe pod nginx-856876659f-9k79d -n web
+ Warning  Failed            51m (x4 over 52m)      kubelet, ip-10-0-1-103  Failed to pull image "nginx:191": rpc error: code = Unknown desc = Error response from daemon: manifest for nginx:191 not found
+
+# Шагу 4.
+cloud_user@ip-10-0-1-101:~$ kubectl run busybox --image=busybox --rm -it --restart=Never -- sh
+If you don't see a command prompt, try pressing enter.
+/ # wget -qO- 10.244.1.8:80
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+/ #
