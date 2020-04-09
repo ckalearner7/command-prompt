@@ -1,0 +1,728 @@
+						Practice
+
+###############
+#Prerequisites for using kops)#
+###############
+# Шаг 1. Prerequisites:
+	– Bastion Host instance 
+	– AWS-cli setup
+	– S3 bucket
+	- kubectl (тут я не уверен, но скорее всего)
+
+# Шаг 2. Installation kops on ubuntu box:
+	wget https://github.com/kubernetes/kops/releases/download/1.6.1/kops-linux-amd64
+	chmod +x kops-linux-amd64
+	sudo mv kops-linux-amd64 /usr/local/bin/kops
+
+###############
+#Lab 1: Upgrade Kubernetes Using kops#
+###############
+# Дополнительный материал: https://medium.com/cloud-academy-inc/setup-kubernetes-on-aws-using-kops-877f02d12fc1
+
+# Суть: Установить кластер с помощью kops. Создать под nginx. Обновить кластер с помощью kops. Убедиться, что под работает.
+
+# Описание: Сам kops во всех лабораторных работах уже установлен
+Во время создания кластера через kops, создается: отдельная VPC, EC2 инстансы, A-записи в Route53 для Kubernetes API, в S3 записывается конфигурация etcd кластера
+# Шаг 0. Проверить, что на Bastion host установлены необходимые компоненты:
+
+[cloud_user@ip-10-192-10-115 ~]$ ls /usr/local/bin | grep kube
+kubectl
+
+[cloud_user@ip-10-192-10-115 ~]$ ls /usr/local/bin | grep kops
+kops
+
+[cloud_user@ip-10-192-10-115 ~]$ ls ~/.aws/
+config  credentials
+
+#Проверяем, что домен создан
+[cloud_user@ip-10-192-10-115 ~]$ aws route53 list-hosted-zones | jq '.HostedZones[0] .Name' | tr -d '"' | sed 's/\.$//'
+cmcloudlab1814.info
+
+# Шаг 1. Create The Cluster
+	# Шаг 1.1. Use the script provided on the bastion host to create a cluster.
+		$ . ./k8s-create.sh
+		
+[cloud_user@ip-10-192-10-67 ~]$ ls
+k8s-create.sh
+
+[cloud_user@ip-10-192-10-67 ~]$ vi k8s-create.sh
+export AWS_HOSTED_ZONE="$(aws route53 list-hosted-zones | jq '.HostedZones[0] .Name' | tr -d '"' | sed 's/\.$//' )"
+echo "Hosted Zone:" $AWS_HOSTED_ZONE
+echo "CREATING S3 BUCKET"
+echo "=================="
+aws s3 mb s3://k8s3.$AWS_HOSTED_ZONE
+export KOPS_STATE_STORE=s3://k8s3.$AWS_HOSTED_ZONE
+export KOPS_CLUSTER_NAME=k8s.$AWS_HOSTED_ZONE
+echo "CREATING RSA KEY"
+echo "================="
+ssh-keygen -q -f ./.ssh/id_rsa -N ''
+echo "CREATING CLUSTER"
+echo "================="
+kops create cluster --master-size=t2.medium --zones=us-east-1c --name=$KOPS_CLUSTER_NAME
+
+[cloud_user@ip-10-192-10-67 ~]$ . ./k8s-create.sh
+...
+Cluster configuration has been created.
+
+Suggestions:
+ * list clusters with: kops get cluster
+ * edit this cluster with: kops edit cluster k8s.cmcloudlab1901.info
+ * edit your node instance group: kops edit ig --name=k8s.cmcloudlab1901.info nodes
+ * edit your master instance group: kops edit ig --name=k8s.cmcloudlab1901.info master-us-east-1c
+
+Finally configure your cluster with: kops update cluster --name k8s.cmcloudlab1901.info --yes
+
+[cloud_user@ip-10-192-10-67 ~]$ kops edit cluster
+# Please edit the object below. Lines beginning with a '#' will be ignored,
+# and an empty file will abort the edit. If an error occurs while saving this file will be
+# reopened with the relevant failures.
+#
+apiVersion: kops/v1alpha2
+kind: Cluster
+metadata:
+  creationTimestamp: 2020-04-08T11:29:39Z
+  name: k8s.cmcloudlab1901.info
+spec:
+  api:
+    dns: {}
+  authorization:
+    rbac: {}
+  channel: stable
+  cloudProvider: aws
+  configBase: s3://k8s3.cmcloudlab1901.info/k8s.cmcloudlab1901.info
+  etcdClusters:
+  - cpuRequest: 200m
+    etcdMembers:
+    - instanceGroup: master-us-east-1c
+      name: c
+    memoryRequest: 100Mi
+    name: main
+  - cpuRequest: 100m
+    etcdMembers:
+    - instanceGroup: master-us-east-1c
+      name: c
+    memoryRequest: 100Mi
+    name: events
+  iam:
+    allowContainerRegistry: true
+    legacy: false
+  kubelet:
+    anonymousAuth: false
+  kubernetesApiAccess:
+  - 0.0.0.0/0
+  kubernetesVersion: 1.12.10
+  masterInternalName: api.internal.k8s.cmcloudlab1901.info
+  masterPublicName: api.k8s.cmcloudlab1901.info
+  networkCIDR: 172.20.0.0/16
+  networking:
+    kubenet: {}
+  nonMasqueradeCIDR: 100.64.0.0/10
+  sshAccess:
+  - 0.0.0.0/0
+  subnets:
+  - cidr: 172.20.32.0/19
+    name: us-east-1c
+    type: Public
+    zone: us-east-1c
+  topology:
+    dns:
+      type: Public
+    masters: public
+    nodes: public
+
+	# Шаг 1.2. Then you may create the cluster with:
+		$ kops update cluster --yes
+		
+[cloud_user@ip-10-192-10-67 ~]$ kops update cluster --yes
+...
+kops has set your kubectl context to k8s.cmcloudlab1901.info
+Cluster is starting.  It should be ready in a few minutes.
+Suggestions:
+ * validate cluster: kops validate cluster
+ * list nodes: kubectl get nodes --show-labels
+ * ssh to the master: ssh -i ~/.ssh/id_rsa admin@api.k8s.cmcloudlab1901.info
+ * the admin user is specific to Debian. If not using Debian please use the appropriate user based on your OS.
+ * read about installing addons at: https://github.com/kubernetes/kops/blob/master/docs/addons.md.
+ 
+	# После этого шага появятся новые сущности в AWS
+
+	# Шаг 1.3. Then you may validate the cluster once created with:
+		$ kops validate cluster
+		
+[cloud_user@ip-10-192-10-67 ~]$ kops validate cluster
+Validating cluster k8s.cmcloudlab1901.info
+
+INSTANCE GROUPS
+NAME                    ROLE    MACHINETYPE     MIN     MAX     SUBNETS
+master-us-east-1c       Master  t2.medium       1       1       us-east-1c
+nodes                   Node    t2.medium       2       2       us-east-1c
+
+NODE STATUS
+NAME                            ROLE    READY
+ip-172-20-41-108.ec2.internal   node    True
+ip-172-20-58-28.ec2.internal    master  True
+ip-172-20-62-244.ec2.internal   node    True
+
+Your cluster k8s.cmcloudlab1901.info is ready
+
+	# Шаг 1.4. Установка nginx deployment в нашем кластере (4 ода в rs): 
+
+[cloud_user@ip-10-192-10-67 ~]$ kubectl apply -f https://raw.githubusercontent.com/linuxacademy/content-kubernetes-security-ac/master/nginx179.yaml
+deployment.apps "nginx-deployment" created
+
+[cloud_user@ip-10-192-10-67 ~]$ kubectl get pods
+NAME                                READY     STATUS    RESTARTS   AGE
+nginx-deployment-5c689d88bb-2ghgj   1/1       Running   0          25s
+nginx-deployment-5c689d88bb-6j67s   1/1       Running   0          25s
+nginx-deployment-5c689d88bb-bd7z2   1/1       Running   0          25s
+nginx-deployment-5c689d88bb-dmvl5   1/1       Running   0          25s
+
+# Шаг 2. Update the Kubernetes Version
+	# Шаг 2.1. Use the kops edit command to edit the cluster configuration file.
+		$ kops edit cluster
+
+[cloud_user@ip-10-192-10-67 ~]$ kops edit cluster
+
+	# Меняем kubernetesVersion: 1.12.10 на kubernetesVersion: 1.12.11
+
+	# Шаг 2.2. Change the Kubernetes version to 1.12.9
+	Then after saving, update the cluster.
+		$ kops update cluster --yes
+		
+[cloud_user@ip-10-192-10-67 ~]$ kops update cluster --yes
+I0408 11:54:09.319103    4432 executor.go:103] Tasks: 0 done / 85 total; 43 can run
+I0408 11:54:09.884304    4432 executor.go:103] Tasks: 43 done / 85 total; 24 can run
+I0408 11:54:10.054142    4432 executor.go:103] Tasks: 67 done / 85 total; 16 can run
+I0408 11:54:10.380653    4432 executor.go:103] Tasks: 83 done / 85 total; 2 can run
+I0408 11:54:10.482243    4432 executor.go:103] Tasks: 85 done / 85 total; 0 can run
+I0408 11:54:10.482356    4432 dns.go:153] Pre-creating DNS records
+I0408 11:54:11.355220    4432 update_cluster.go:291] Exporting kubecfg for cluster
+kops has set your kubectl context to k8s.cmcloudlab1901.info
+
+Cluster changes have been applied to the cloud.
+
+Changes may require instances to restart: kops rolling-update cluster
+
+	# Шаг 2.3. Then run the rolling update
+		$ kops rolling-update cluster --yes	
+	You may watch the cluster update from the aws console as it terminates and re-instantiates nodes (создаются новые ноды).	
+	
+[cloud_user@ip-10-192-10-67 ~]$ kops rolling-update cluster --yes
+NAME                    STATUS  NEEDUPDATE      READY   MIN     MAX     NODES
+master-us-east-1c       Ready   0               1       1       1       1
+nodes                   Ready   0               2       2       2       2
+
+	# После обновления поды nginx сохранятся в кластере
+
+###############
+#Lab 2: Hardening a kops Default Deployment with Kube-bench#
+###############
+# Суть: Установить кластер с помощью kops. Скачать kube-bench ля проверки настроек кластера. Выполнить несколько рекомендаций.
+
+# Описание:
+
+# Шаг 1. Use kops to Create the Cluster
+	# Шаг 1.1. A script has been provided to run kops and create the cluster.
+	To run the script, type:
+		$ . ./k8s-create.sh
+
+	# Шаг 1.2. To actually create the cluster, type:
+		$ kops update cluster --yes
+		
+	# После этого шага появятся новые сущности в AWS
+	# Еще в выводе будут подсказки:
+		Suggestions:
+		 * validate cluster: kops validate cluster
+		 * list nodes: kubectl get nodes --show-labels
+		 * ssh to the master: ssh -i ~/.ssh/id_rsa admin@api.k8s.cmcloudlab563.info
+		 * the admin user is specific to Debian. If not using Debian please use the appropriate user based on your OS.
+		 * read about installing addons at: https://github.com/kubernetes/kops/blob/master/docs/addons.md.
+
+	# Шаг 1.3. To validate the cluster, type (перед выполнением команды подолжать 5-10 минут):
+		$ kops validate cluster
+		
+	[cloud_user@ip-10-192-10-184 ~]$ kops validate cluster
+	Validating cluster k8s.cmcloudlab563.info
+
+	INSTANCE GROUPS
+	NAME                    ROLE    MACHINETYPE     MIN     MAX     SUBNETS
+	master-us-east-1c       Master  t2.medium       1       1       us-east-1c
+	nodes                   Node    t2.medium       2       2       us-east-1c
+
+	NODE STATUS
+	NAME                            ROLE    READY
+	ip-172-20-36-42.ec2.internal    node    True
+	ip-172-20-40-95.ec2.internal    master  True
+	ip-172-20-41-194.ec2.internal   node    True
+
+	Your cluster k8s.cmcloudlab563.info is ready
+
+# Шаг 2. Retrieve a connect string from Amazon AWS and Connect to the Master Node
+	# Шаг 2.1. Use the Amazon AWS Console and retrieve a connect string for the master node. Then use ssh to connect to the master node.
+		$ ssh -i [YOUR .pem HERE] admin@[YOUR dns name HERE]
+		
+	[cloud_user@ip-10-192-10-184 ~]$ ssh -i ~/.ssh/id_rsa admin@api.k8s.cmcloudlab563.info
+
+# Шаг 3. Run the AquaSec kube-bench utility on the Master Node
+	# Шаг 3.1. From your terminal session on the master node...
+	To install the kube-bench utility on the master node, type:
+		$ sudo docker run --rm -v `pwd`:/host aquasec/kube-bench:latest install
+
+	admin@ip-172-20-40-95:~$ sudo docker run --rm -v `pwd`:/host aquasec/kube-bench:latest install
+	Unable to find image 'aquasec/kube-bench:latest' locally
+	latest: Pulling from aquasec/kube-bench
+	aad63a933944: Pull complete
+	fe6fdf88cfd4: Pull complete
+	3795d154d96a: Pull complete
+	84586d126fdf: Pull complete
+	87a307fbb115: Pull complete
+	4c535fae5c35: Pull complete
+	a41324f6f906: Pull complete
+	Digest: sha256:ee55386ef35bea93a3a0900fd714038bebd156e0448addf839f38093dbbaace9
+	Status: Downloaded newer image for aquasec/kube-bench:latest
+	===============================================
+	kube-bench is now installed on your host
+	Run ./kube-bench to perform a security check
+	===============================================
+	admin@ip-172-20-40-95:~$ ls
+	cfg  kube-bench
+
+	# Шаг 3.2. Then to run the utility and output the report to a file, type:
+		$ ./kube-bench master > orig.report
+		
+	# master - это, видимо, ветка
+	
+	# Пример отчета:
+	[INFO] 1 Master Node Security Configuration
+	[INFO] 1.1 API Server
+	[PASS] 1.1.1 Ensure that the --anonymous-auth argument is set to false (Scored)
+	[FAIL] 1.1.2 Ensure that the --basic-auth-file argument is not set (Scored)
+	[PASS] 1.1.3 Ensure that the --insecure-allow-any-token argument is not set (Scored)
+	[PASS] 1.1.4 Ensure that the --kubelet-https argument is set to true (Scored)
+	[FAIL] 1.1.5 Ensure that the --insecure-bind-address argument is not set (Scored)
+	[FAIL] 1.1.6 Ensure that the --insecure-port argument is set to 0 (Scored)
+	[PASS] 1.1.7 Ensure that the --secure-port argument is not set to 0 (Scored)
+	== Remediations == # Что нужно исправить
+	1.1.2 Follow the documentation and configure alternate mechanisms for authentication. Then,
+	edit the API server pod specification file /etc/kubernetes/manifests/kube-apiserver.manifest
+	on the master node and remove the --basic-auth-file=<filename>
+	parameter.
+
+	1.1.5 Edit the API server pod specification file /etc/kubernetes/manifests/kube-apiserver.manifest
+	on the master node and remove the --insecure-bind-address
+	parameter.
+
+	1.1.6 Edit the API server pod specification file /etc/kubernetes/manifests/kube-apiserver.manifest
+	apiserver.yaml on the master node and set the below parameter.
+	--insecure-port=0
+
+# Шаг 4. Remediate Failed Tests 1.1.2, 1.1.5 and 1.1.6 (выполняем советы по исправлению)
+	# Шаг 4.1. Use the process status command to look at the current apiserver arguments.
+		$ ps -aef | grep kube-apiserver
+		
+	admin@ip-172-20-40-95:~$ ps -aef | grep kube-apiserver
+	root      3177  3160  2 07:12 ?        00:00:45 /usr/local/bin/kube-apiserver --allow-privileged=true --anonymous-auth=false --apiserver-count=1 --authorization-mode=RBAC --basic-auth-file=/srv/kubernetes/basic_auth.csv --bind-address=0.0.0.0 --client-ca-file=/srv/kubernetes/ca.crt --cloud-provider=aws --enable-admission-plugins=Initializers,NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,NodeRestriction,ResourceQuota --etcd-quorum-read=false --etcd-servers-overrides=/events#http://127.0.0.1:4002 --etcd-servers=http://127.0.0.1:4001 --insecure-bind-address=127.0.0.1 --insecure-port=8080 --kubelet-preferred-address-types=InternalIP,Hostname,ExternalIP --proxy-client-cert-file=/srv/kubernetes/apiserver-aggregator.cert --proxy-client-key-file=/srv/kubernetes/apiserver-aggregator.key --requestheader-allowed-names=aggregator --requestheader-client-ca-file=/srv/kubernetes/apiserver-aggregator-ca.cert --requestheader-extra-headers-prefix=X-Remote-Extra- --requestheader-group-headers=X-Remote-Group --requestheader-username-headers=X-Remote-User --secure-port=443 --service-cluster-ip-range=100.64.0.0/13 --storage-backend=etcd2 --tls-cert-file=/srv/kubernetes/server.cert --tls-private-key-file=/srv/kubernetes/server.key --token-auth-file=/srv/kubernetes/known_tokens.csv --v=2
+	root      3189  3177  0 07:12 ?        00:00:00 tee -a /var/log/kube-apiserver.log
+	admin     7925  5123  0 07:39 pts/0    00:00:00 grep kube-apiserver
+	
+	# Обратить внимание на ID процесса - 3177
+
+	# Шаг 4.2. Use the vi editory as super user to edit the kube apiserver manifest.
+		$ sudo vi /etc/kubernetes/manifests/mainfest-kube-apiserver.conf
+		
+	admin@ip-172-20-40-95:~$ ls /etc/kubernetes/manifests/
+	etcd-events.manifest  etcd.manifest  kube-apiserver.manifest  kube-controller-manager.manifest  kube-proxy.manifest  kube-scheduler.manifest
+
+	admin@ip-172-20-40-95:~$ sudo vi /etc/kubernetes/manifests/kube-apiserver.manifest
+	
+	# Удаляем --basic-auth-file=<filename>
+	# Удаляем --insecure-bind-address
+	# Заменяем порт 8080 на 0 в --insecure-port=0
+
+	admin@ip-172-20-40-95:~$ ps -aef | grep kube-apiserver
+	root      8957  8941  0 07:46 ?        00:00:00 /usr/local/bin/kube-apiserver --allow-privileged=true --anonymous-auth=false --apiserver-count=1 --authorization-mode=RBAC --bind-address=0.0.0.0 --client-ca-file=/srv/kubernetes/ca.crt --cloud-provider=aws --enable-admission-plugins=Initializers,NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,NodeRestriction,ResourceQuota --etcd-quorum-read=false --etcd-servers-overrides=/events#http://127.0.0.1:4002 --etcd-servers=http://127.0.0.1:4001 --insecure-port=0 --kubelet-preferred-address-types=InternalIP,Hostname,ExternalIP --proxy-client-cert-file=/srv/kubernetes/apiserver-aggregator.cert --proxy-client-key-file=/srv/kubernetes/apiserver-aggregator.key --requestheader-allowed-names=aggregator --requestheader-client-ca-file=/srv/kubernetes/apiserver-aggregator-ca.cert --requestheader-extra-headers-prefix=X-Remote-Extra- --requestheader-group-headers=X-Remote-Group --requestheader-username-headers=X-Remote-User --secure-port=443 --service-cluster-ip-range=100.64.0.0/13 --storage-backend=etcd2 --tls-cert-file=/srv/kubernetes/server.cert --tls-private-key-file=/srv/kubernetes/server.key --token-auth-file=/srv/kubernetes/known_tokens.csv --v=2
+	root      8971  8957  0 07:46 ?        00:00:00 tee -a /var/log/kube-apiserver.log
+	admin     8984  5123  0 07:46 pts/0    00:00:00 grep kube-apiserver
+
+	# Обратить внимание, что ID процесса изменился - 8957
+		
+	# Шаг 4.3. Edit the test recommendations per the remediation listed in the kube-bench report.
+	Rerun the kube=bench report after the api server has restarted.
+		$ ./kube-bench master > new.report
+
+	# Шаг 4.4. Compare the old and new reports using the Linux diff command.
+		$ diff orig.report new.report
+		
+	admin@ip-172-20-40-95:~$ diff orig.report new.report
+	4c4
+	< [FAIL] 1.1.2 Ensure that the --basic-auth-file argument is not set (Scored)
+	---
+	> [PASS] 1.1.2 Ensure that the --basic-auth-file argument is not set (Scored)
+	7,8c7,8
+	< [FAIL] 1.1.5 Ensure that the --insecure-bind-address argument is not set (Scored)
+	< [FAIL] 1.1.6 Ensure that the --insecure-port argument is set to 0 (Scored)
+	---
+	> [PASS] 1.1.5 Ensure that the --insecure-bind-address argument is not set (Scored)
+	> [PASS] 1.1.6 Ensure that the --insecure-port argument is set to 0 (Scored)
+	100,112d99
+	< 1.1.2 Follow the documentation and configure alternate mechanisms for authentication. Then,
+	< edit the API server pod specification file /etc/kubernetes/manifests/kube-apiserver.manifest
+	< on the master node and remove the --basic-auth-file=<filename>
+	< parameter.
+	<
+	< 1.1.5 Edit the API server pod specification file /etc/kubernetes/manifests/kube-apiserver.manifest
+	< on the master node and remove the --insecure-bind-address
+	< parameter.
+	<
+	< 1.1.6 Edit the API server pod specification file /etc/kubernetes/manifests/kube-apiserver.manifest
+	< apiserver.yaml on the master node and set the below parameter.
+	< --insecure-port=0
+	<
+	415,416c402,403
+	< 27 checks PASS
+	< 41 checks FAIL
+	---
+	> 30 checks PASS
+	> 38 checks FAIL
+	
+	# Сравнивая отчеты, видим, что часть ошибок исправлена
+
+###############
+#Lab 3: Patching Live Kubernetes Deployments and Draining a Node for Maintenance#
+###############
+# Суть: Установить кластер с помощью kops. Обновить image для контейнера. Вывести ноду и завести обратно в кластер.
+
+# Описание:
+
+# Шаг 1. Create The Cluster
+	# Шаг 1.1. Use the script provided on the bastion host to create a cluster.
+		$ . ./k8s-create.sh
+
+	# Шаг 1.2. Then you may create the cluster with:
+		$ kops update cluster --yes
+
+	# Шаг 1.3. Then you may validate the cluster once created with:
+		$ kops validate cluster
+
+# Шаг 2. Deploy the NGINX replicas
+	# Шаг 2.1. Deploy four replicas of the NGINX web server, version 1.7.9:
+		$ kubectl apply -f https://raw.githubusercontent.com/linuxacademy/content-kubernetes-security-ac/master/nginx179.yaml
+
+	# Шаг 2.2. View the pods running:
+		$ kubectl get pods
+
+	# Шаг 2.3. View the version of the container within the pod:
+		$ kubectl get pods -o wide
+		
+[cloud_user@ip-10-192-10-115 ~]$ kubectl get pods -o wide
+NAME                                READY     STATUS    RESTARTS   AGE       IP           NODE
+nginx-deployment-5c689d88bb-62tdw   1/1       Running   0          23s       100.96.1.4   ip-172-20-32-181.ec2.internal
+nginx-deployment-5c689d88bb-g6h2w   1/1       Running   0          23s       100.96.2.4   ip-172-20-33-21.ec2.internal
+nginx-deployment-5c689d88bb-l7jrp   1/1       Running   0          23s       100.96.2.3   ip-172-20-33-21.ec2.internal
+nginx-deployment-5c689d88bb-z4w6v   1/1       Running   0          23s       100.96.1.5   ip-172-20-32-181.ec2.internal
+
+# Шаг 3. Patch the Live Containers
+	# Шаг 3.1. Download the NGINX 1.9.1 pod spec with the wget command
+		$ wget https://raw.githubusercontent.com/linuxacademy/content-kubernetes-security-ac/master/nginx-patch-191.yaml
+		
+[cloud_user@ip-10-192-10-115 ~]$ wget https://raw.githubusercontent.com/linuxacademy/content-kubernetes-security-ac/master/nginx-patch-191.yaml
+[cloud_user@ip-10-192-10-115 ~]$ ls
+k8s-create.sh  nginx-patch-191.yaml
+[cloud_user@ip-10-192-10-115 ~]$ cat nginx-patch-191.yaml
+spec:
+  template:
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.9.1
+
+	# Шаг 3.2. Patch the live containers running in the nginx-deployment with version 1.9.1 (ПОЛЕЗНАЯ ШТУКА - ОБНОВЛЕНИЕ ВЕРСИИ КОНТЕЙНЕРА В DEPLOYMENT)
+		$ kubectl patch deployment nginx-deployment --patch "$(cat nginx-patch-191.yaml)"
+		
+[cloud_user@ip-10-192-10-115 ~]$ kubectl patch deployment nginx-deployment --patch "$(cat nginx-patch-191.yaml)"
+deployment.extensions "nginx-deployment" patched
+
+[cloud_user@ip-10-192-10-115 ~]$ kubectl get deploy -o wide
+NAME               DESIRED   CURRENT   UP-TO-DATE   AVAILABLE   AGE       CONTAINERS   IMAGES        SELECTOR
+nginx-deployment   4         4         4            4           17m       nginx        nginx:1.9.1   app=nginx
+
+	# Шаг 3.3. Interrogate the status of the deployment
+		$ kubectl get deployment nginx-deployment --output yaml
+
+	# Шаг 3.4. Check the pods
+		$ kubectl get pods -o wide
+		
+[cloud_user@ip-10-192-10-115 ~]$ kubectl get pods -o wide
+NAME                                READY     STATUS        RESTARTS   AGE       IP           NODE
+nginx-deployment-5c689d88bb-g6h2w   0/1       Terminating   0          16m       100.96.2.4   ip-172-20-33-21.ec2.internal
+nginx-deployment-5c689d88bb-l7jrp   0/1       Terminating   0          16m       100.96.2.3   ip-172-20-33-21.ec2.internal
+nginx-deployment-5c689d88bb-z4w6v   0/1       Terminating   0          16m       100.96.1.5   ip-172-20-32-181.ec2.internal
+nginx-deployment-6987cdb55b-cdskv   1/1       Running       0          6s        100.96.2.6   ip-172-20-33-21.ec2.internal
+nginx-deployment-6987cdb55b-kbc66   1/1       Running       0          12s       100.96.1.6   ip-172-20-32-181.ec2.internal
+nginx-deployment-6987cdb55b-kql85   1/1       Running       0          5s        100.96.1.7   ip-172-20-32-181.ec2.internal
+nginx-deployment-6987cdb55b-sz645   1/1       Running       0          12s       100.96.2.5   ip-172-20-33-21.ec2.internal
+
+# Шаг 4. Drain a Worker Node for Maintance
+	# Шаг 4.1. See which pods are running on which nodes
+		$ kubectl get pods -o wide
+		
+[cloud_user@ip-10-192-10-115 ~]$ kubectl get pods -o wide
+NAME                                READY     STATUS        RESTARTS   AGE       IP           NODE
+nginx-deployment-6987cdb55b-cdskv   1/1       Running       0          6s        100.96.2.6   ip-172-20-33-21.ec2.internal
+nginx-deployment-6987cdb55b-kbc66   1/1       Running       0          12s       100.96.1.6   ip-172-20-32-181.ec2.internal
+nginx-deployment-6987cdb55b-kql85   1/1       Running       0          5s        100.96.1.7   ip-172-20-32-181.ec2.internal
+nginx-deployment-6987cdb55b-sz645   1/1       Running       0          12s       100.96.2.5   ip-172-20-33-21.ec2.internal
+
+	# Шаг 4.2. Select a node to drain and drain it (вывели ноду из обращения)
+		$ kubectl drain [Node Name]
+		
+[cloud_user@ip-10-192-10-115 ~]$ kubectl drain ip-172-20-32-181.ec2.internal
+node "ip-172-20-32-181.ec2.internal" cordoned
+pod "nginx-deployment-6987cdb55b-kql85" evicted
+pod "nginx-deployment-6987cdb55b-kbc66" evicted
+pod "kube-dns-autoscaler-867b9fd49d-9bm8x" evicted
+pod "kube-dns-57dd96bb49-w87rs" evicted
+node "ip-172-20-32-181.ec2.internal" drained
+
+	# Шаг 4.3. Examine the status of the deployment replicas (поды переехали на другую)
+		$ kubectl get pods -o wide
+		
+[cloud_user@ip-10-192-10-115 ~]$ kubectl get pods -o wide
+NAME                                READY     STATUS    RESTARTS   AGE       IP            NODE
+nginx-deployment-6987cdb55b-4cws2   1/1       Running   0          1m        100.96.2.7    ip-172-20-33-21.ec2.internal
+nginx-deployment-6987cdb55b-4dz6c   1/1       Running   0          1m        100.96.2.10   ip-172-20-33-21.ec2.internal
+nginx-deployment-6987cdb55b-cdskv   1/1       Running   0          11m       100.96.2.6    ip-172-20-33-21.ec2.internal
+nginx-deployment-6987cdb55b-sz645   1/1       Running   0          12m       100.96.2.5    ip-172-20-33-21.ec2.internal
+
+	# Шаг 4.4. Now reattach the node
+		$ kubectl uncordon [Node Name]
+		
+[cloud_user@ip-10-192-10-115 ~]$ kubectl uncordon ip-172-20-32-181.ec2.internal
+node "ip-172-20-32-181.ec2.internal" uncordoned
+
+[cloud_user@ip-10-192-10-115 ~]$ kubectl get nodes
+NAME                            STATUS    ROLES     AGE       VERSION
+ip-172-20-32-181.ec2.internal   Ready     node      34m       v1.12.10
+ip-172-20-33-21.ec2.internal    Ready     node      34m       v1.12.10
+ip-172-20-37-68.ec2.internal    Ready     master    34m       v1.12.10
+
+###############
+#Lab 4: Establishing a Private Cluster with a Secure Bastion Host#
+###############
+# Суть: Установить кластер с помощью kops. Тут создается дополнительный безопасный Bastion Host ля кластера (kops-cкрипт немного изменен)
+
+# Описание: В этом задании хорошие пояснения.
+
+# Шаг 1. Use the script staged to create a cluster with a private topology and secure bastion host.
+
+	Once your lab has started, log into the Amazon AWS Console and notice the EC2 dashboard. There should be only the Bastion Host that has been created as a Jump Box for our lab. Notice that this is a public host and has a public IP address.
+
+	Use ssh to establish connection to the Jump Box and do a listing of the home directory.
+
+	$ ls -l
+
+	The script k8s-create-ac.sh shound be staged for your use. You may look at the script with the cat command.
+	$ cat k8s-create-ac.sh
+	
+[cloud_user@ip-10-192-10-63 ~]$ cat k8s-create-ac.sh
+export AWS_HOSTED_ZONE="$(aws route53 list-hosted-zones | jq '.HostedZones[0] .Name' | tr -d '"' | sed 's/\.$//' )"
+echo "Hosted Zone:" $AWS_HOSTED_ZONE
+echo "CREATING S3 BUCKET"
+echo "=================="
+aws s3 mb s3://k8s3.$AWS_HOSTED_ZONE
+export KOPS_STATE_STORE=s3://k8s3.$AWS_HOSTED_ZONE
+export KOPS_CLUSTER_NAME=k8s.$AWS_HOSTED_ZONE
+echo "CREATING RSA KEY"
+echo "================="
+ssh-keygen -q -f ./.ssh/id_rsa -N ''
+echo "CREATING CLUSTER"
+echo "================="
+kops create cluster --master-size=t2.medium --zones=us-east-1c --name=$KOPS_CLUSTER_NAME --cloud aws\
+  --authorization rbac --topology private --bastion --networking canal --ssh-public-key ~/.ssh/id_rsa.pub
+  
+# Здесь используется canal, создается bastion host, подключение через ключ
+
+	Notice that the command to create the cluster passes the '--topology-private and --bastion' arguments to the kops installer.
+
+	You may create the cluster config files by executing the script.
+	$ . ./k8s-create-ac.sh
+	
+	Once the script has run, you can use the kops edit command to look at the cluster configuration.
+	$ kops edit cluster
+	
+# В отличии от предыдущих примеров здесь немного изменилась конфигурация:
+  kubernetesApiAccess:
+  - 0.0.0.0/0
+  networking:
+    canal: {}
+  nonMasqueradeCIDR: 100.64.0.0/10
+  sshAccess:
+  - 0.0.0.0/0
+
+	Notice the internal IP addresses specified and the Kubernetes version.
+
+	Next you can initialize the cluster.
+	$ kops update cluster --yes
+	
+Suggestions:
+ * validate cluster: kops validate cluster
+ * list nodes: kubectl get nodes --show-labels
+ * ssh to the bastion: ssh -A -i ~/.ssh/id_rsa admin@bastion.k8s.cmcloudlab89.info # Доступ к новому Bastion Host
+ * the admin user is specific to Debian. If not using Debian please use the appropriate user based on your OS.
+ * read about installing addons at: https://github.com/kubernetes/kops/blob/master/docs/addons.md.
+
+	While kops is initializing the cluster you may go back into the Amazon AWS console and observe the servers being created.
+
+	After 5-10 minutes kops will complete.
+	
+	Then you may validate the cluster once created with:
+	$ kops validate cluster
+
+	Notice the instructions listed on how to ssh into the bastion host that has been created by kops.
+
+	THIS IS NOT THE BASTION HOST CREATED AS A JUMP BOX. THIS IS A NEW BASTION HOST CREATED BY KOPS THAT IS INSIDE THE VPC WITH THE MASTER AND WORKER NODES.
+
+# Шаг 2. Access the bastion host use ssh with the RSA key and attempt access to the master node.
+
+	Use the ssh command specified to establish a terminal session on the secure Bastion.
+	$ ssh -A -i ~/.ssh/id_rsa admin@[bastion dns name]
+	
+[cloud_user@ip-10-192-10-63 ~]$ ssh -A -i ~/.ssh/id_rsa admin@bastion.k8s.cmcloudlab89.info
+admin@ip-172-20-3-152:~$ kubectl get nodes
+-bash: kubectl: command not found
+
+	Notice in the Amazon Console that the secure Bastion has both external and internal IP addresses allocated.
+
+	Notice that the master and worker nodes do not have public IP addresses allocated. THESE ARE PRIVATE KUBERNETES NODES.
+
+	When using this installation method notice that the kubectl command is not enabled on the jump box, or the secure bastion host.
+
+	Attempt to access the Kubernetes Master with ssh.
+	$ ssh admin@[Master Node IP Address]
+	
+admin@ip-172-20-3-152:~$ ls ~/.ssh/
+authorized_keys
+
+admin@ip-172-20-3-152:~$ ssh admin@172.20.53.36
+The authenticity of host '172.20.53.36 (172.20.53.36)' can't be established.
+ECDSA key fingerprint is SHA256:dgtNlqcQe3OZpGfMhLyxkEsKKpw9u+VdINXjXKPfvyI.
+Are you sure you want to continue connecting (yes/no)? yes
+Warning: Permanently added '172.20.53.36' (ECDSA) to the list of known hosts.
+Permission denied (publickey).
+
+admin@ip-172-20-3-152:~$ exit
+logout
+Connection to bastion.k8s.cmcloudlab89.info closed.
+
+[cloud_user@ip-10-192-10-63 ~]$ ls ~/.ssh/
+authorized_keys  id_rsa  id_rsa.pub  known_hosts # На лабораторном Bastion Host private и public на месте (созданы через k8s-create-ac.sh)
+
+	This command will fail because access requires the use of the private RSA key.
+
+	Since the RSA key exists on the original Jump Box and not the secure bastion host, a ssh agent must be employed.
+
+# Шаг 3. Use an ssh agent to access the secure bastion host again, and then the master node.
+
+	Use the ssh command specified to establish a terminal session on the secure Bastion.
+	$ ssh -A -i ~/.ssh/id_rsa admin@[bastion dns name]
+	
+# Настройка аутентификации на основе SSH-ключей
+# При использовании этой утилиты команда SSH будет работать с ранее загруженными приватными ключами, хранящимися в расшифрованном виде в оперативной памяти агента.
+[cloud_user@ip-10-192-10-63 ~]$ eval `ssh-agent -s`
+Agent pid 22496
+
+[cloud_user@ip-10-192-10-63 ~]$ ssh-add ~/.ssh/id_rsa # Добавляем private ключ
+Identity added: /home/cloud_user/.ssh/id_rsa (/home/cloud_user/.ssh/id_rsa)
+
+[cloud_user@ip-10-192-10-63 ~]$ ssh-add -l
+2048 SHA256:qGdf68AAep5vJovCEczYOCxB1r9EKCiXDdfM++0d2NY /home/cloud_user/.ssh/id_rsa (RSA)
+
+[cloud_user@ip-10-192-10-63 ~]$ ssh -A -i ~/.ssh/id_rsa admin@bastion.k8s.cmcloudlab89.info
+admin@ip-172-20-3-152:~$
+
+	Notice in the Amazon Console that the secure Bastion has both external and internal IP addresses allocated.
+
+	Notice that the master and worker nodes do not have public IP addresses allocated. THESE ARE PRIVATE KUBERNETES NODES.
+
+	When using this installation method notice that the kubectl command is not enabled on the jump box, or the secure bastion host.
+
+	Attempt to access the Kubernetes Master with ssh.
+	$ ssh admin@[Master Node IP Address]
+	
+admin@ip-172-20-3-152:~$ ssh admin@172.20.53.36
+
+admin@ip-172-20-53-36:~$ kubectl get nodes
+NAME                            STATUS    ROLES     AGE       VERSION
+ip-172-20-33-166.ec2.internal   Ready     node      32m       v1.11.10
+ip-172-20-44-29.ec2.internal    Ready     node      32m       v1.11.10
+ip-172-20-53-36.ec2.internal    Ready     master    33m       v1.11.10
+
+	This command will success.
+
+# Шаг 4. Once on the master node interrogate the configuration and run the kube-bench utility.
+
+	FROM THE TERMINAL SESSION ON THE MASTER NODE
+
+	Notice that the kubectl is configured on the master node and is fully functioning.
+	$ kubectl get nodes
+
+	You can interrogate the api server settings with the ps command.
+	$ ps -aef | grep apiserver > /tmp/ps
+
+	... and then use vi to look at the file
+	$ vi /tmp/ps
+
+	Make note of the use of internal addresses by the api server and the private ip addresses used in the configuration.
+
+	You may list the manifest files in the /etc/kubernetes/manifests directory
+	$ sudo ls /etc/kubernetes/manifests
+
+	And you may look at the manifest for the api server using vi
+	$ sudo vi /etc/kubernetes/manifests/kube-apiserver.manifest
+
+	Notice that the kubectl config file is setup to access the api server on a local ip address
+	$ cat .kube/config
+
+	You may examine the cluster's configuration against the CIS Security Benchmark with kube-bench. First install kube-bench with the following command:
+	$ sudo docker run --rm -v `pwd`:/host aquasec/kube-bench:latest install
+
+	Then you may run the command.
+	$ ./kube-bench master
+
+	Now exit from the master node and return to the secure bastion host.
+	$ exit
+
+# Шаг 5. Use an ssh session to remote execute kubectl from the secure bastion host.
+
+	FROM THE SECURE BASTION HOST
+
+	Notice again that kubectl is not enabled.
+
+	You may use ssh to execute the kubectl command on the remote master node.
+	$ ssh admin@[master node ip address] 'any linux command'
+
+	So to list nodes...
+	$ ssh admin@[master node ip] 'kubectl get nodes'
+
+admin@ip-172-20-3-152:~$ ssh admin@172.20.53.36 'kubectl get nodes'
+NAME                            STATUS    ROLES     AGE       VERSION
+ip-172-20-33-166.ec2.internal   Ready     node      40m       v1.11.10
+ip-172-20-44-29.ec2.internal    Ready     node      40m       v1.11.10
+ip-172-20-53-36.ec2.internal    Ready     master    41m       v1.11.10
+
+	To list all running pods...
+	$ ssh admin@[master node ip] 'kubectl get pods --all-namespaces'
+
+	To create a pod using the example pod.yaml in the course github repository...
+	$ ssh admin@[master node ip] \
+		'kubectl create -f https://raw.github.com/linuxacademy/content-kubernetes-security-ac/master/pod.yaml
+
+	To list all running pods and see the one you created...
+	$ ssh admin@[master node ip] 'kubectl get pods --all-namespaces'
+
+	Exit the secure bastion back to the Jump Box
+	$ exit
+
+# Шаг 6. Stop the secure bastion host from the aws console.
+
+	Last but not least, notice how pods may securely be run from the secure bastion host when the RSA key is used in an ssh agent. Once your deployments are completed, you may then shut off all access to the private cluster from outside the VPC by simply stopping the secure bastion host.
