@@ -1,0 +1,204 @@
+						##### Terraform State #####
+###############
+#Terraform Formatting and Remote State#
+###############
+
+# You will learn more about Terraform state and how to version it using a S3 bucket.
+
+# Шаг 1. Create an S3 Bucket
+	Search for S3 in Find Services.
+	Click Create Bucket.
+	Enter a Bucket name. The bucket name must be unique.
+	Make sure the Region is US East (N. Virginia) Click Next.
+	Click Next again on the Configure options page.
+	Click Next again on the Set permissions page.
+	Click Create bucket on the Review page.
+
+# Шаг 2. Add the Terraform Folder to the Bucket
+	Click on the bucket name.
+	Click Create folder.
+	Enter terraform-aws for the folder name.
+	Click Save.
+
+# Шаг 3. Add Backend to Your Scripts
+	From the Docker Swarm Manager navigate to the AWS directory:
+		cd ~/terraform/AWS
+
+# Шаг 4. Set the Environment Variables
+	export AWS_ACCESS_KEY_ID="[ACCESS_KEY]"
+	export AWS_SECRET_ACCESS_KEY="[SECRET_KEY]]"
+	export AWS_DEFAULT_REGION="us-east-1"
+
+# Шаг 5. Create terraform.tf:
+	vi terraform.tf
+
+terraform {
+  backend "s3" {
+    key    = "terraform-aws/terraform.tfstate" # Как создать terraform.tfstatebackup?
+  }
+}
+
+# Шаг 6. Initialize Terraform:
+	terraform init -backend-config "bucket=[BUCKET_NAME]" 
+
+# На этом этапе в S3 появится terraform.tfstate
+{
+    "version": 3,
+    "terraform_version": "0.11.13",
+    "serial": 3,
+    "lineage": "7a50188a-f7ae-201e-8ad8-9a42d39ac3dd",
+    "modules": [
+        {
+            "path": [
+                "root"
+            ],
+            "outputs": {},
+            "resources": {},
+            "depends_on": []
+        },
+        {
+            "path": [
+                "root",
+                "compute"
+            ],
+            "outputs": {},
+            "resources": {},
+            "depends_on": []
+        },
+        {
+            "path": [
+                "root",
+                "networking"
+            ],
+            "outputs": {},
+            "resources": {},
+            "depends_on": []
+        },
+        {
+            "path": [
+                "root",
+                "storage"
+            ],
+            "outputs": {},
+            "resources": {},
+            "depends_on": []
+        }
+    ]
+}	
+
+# Шаг 7. Validate changes:
+	terraform validate
+
+# Шаг 8. Plan the changes:
+	terraform plan
+
+# Шаг 9. Apply the changes:
+	terraform apply -auto-approve
+
+# Шаг 10. Destroy environment:
+	terraform destroy -auto-approve
+	
+	
+###############
+#Using Remote State with Jenkins#
+###############
+# Шаг 1. Using Remote State with Jenkins
+	In this lesson, we will and update our CI/CD process to use remote state with our Jenkins Pipelines. This will allow us to create two separate Jenkins Pipelines: one for deploying the infrastructure and one for destroying it.
+
+# Шаг 2. Create S3 Bucket
+	Search for S3 in Find Services.
+	Click Create Bucket.
+	Enter a Bucket name. The bucket name must be unique.
+	Make sure the Region is US East (N. Virginia) Click Next.
+	Click Next again on the Configure options page.
+	Click Next again on the Set permissions page.
+	Click Create bucket on the Review page.
+
+# Шаг 3. Add the Terraform Folder to the Bucket
+	Click on the bucket name.
+	Click Create folder.
+	Enter terraform-aws for the folder name.
+	Click Save.
+
+# Шаг 4. Create the Jenkins Deploy Job
+	Enter an item name and call it DeployDockerService. Select Pipeline. Click Ok.
+	Click Add Parameter and select String Parameter. For the name enter access_key_id. Set the Default Value to your Access Key Id.
+	Click Add Parameter and select String Parameter. For the name enter secret_access_key. Set the Default Value to your Secret Access Key.
+	Click Add Parameter and select String Parameter. For the name enter bucket_name. Set the Default Value to the name of your S3 Bucket.
+	Click Add Parameter and select Choice Parameter. For the name enter image_name. For choices enter ghost:latest and ghost:alpine. Make sure they are on separate lines.
+	Click Add Parameter and select String Parameter. For the name enter ghost_ext_port. Set the Default Value to 80.
+	In the Pipeline section add the following to Script:
+
+env.AWS_ACCESS_KEY_ID = "${access_key_id}" # Установка в Jenkins пееременных окружения
+env.AWS_SECRET_ACCESS_KEY = "${secret_access_key}"
+env.AWS_DEFAULT_REGION = 'us-east-1'
+
+node {
+  git (
+    url: 'https://github.com/linuxacademy/content-terraform-docker-service.git',
+    branch: 'remote-state'
+  )
+  stage('init') {
+    sh label: 'terraform init', script: "terraform init -backend-config \"bucket=${bucket_name}\""
+  }
+  stage('plan') {
+    sh label: 'terraform plan', script: "terraform plan -out=tfplan -input=false -var image_name=${image_name} -var ghost_ext_port=${ghost_ext_port}"
+  }
+  stage('apply') {
+    sh label: 'terraform apply', script: "terraform apply -lock=false -input=false tfplan"
+  }
+}
+
+# Шаг 5. Create the Jenkins Destroy Job
+	Enter an item name and call it DestroyDockerService.
+	In Copy from enter DeployDockerService. Click Ok.
+	Change Pipeline section to the following:
+
+env.AWS_ACCESS_KEY_ID = "${access_key_id}"
+env.AWS_SECRET_ACCESS_KEY = "${secret_access_key}"
+env.AWS_DEFAULT_REGION = 'us-east-1'
+
+node {
+  git (
+    url: 'https://github.com/linuxacademy/content-terraform-docker-service.git',
+    branch: 'remote-state'
+  )
+  stage('init') {
+    sh label: 'terraform init', script: "terraform init -backend-config \"bucket=${bucket_name}\""
+  }
+  stage('plan_destroy') {
+    sh label: 'terraform plan', script: "terraform plan -destroy -out=tfdestroyplan -input=false -var image_name=${image_name} -var ghost_ext_port=${ghost_ext_port}"
+  }
+  stage('destroy') {
+    sh label: 'terraform apply', script: "terraform apply -lock=false -input=false tfdestroyplan"
+  }
+}
+
+# После выполнения этой Jenkins Job может возникнуть ошибка. Связано с тем ,что мы копировали эту Jenkins Job из предыдущей. Для корректной работы стоит почистить .terraform (Шаг 6)
+Apply complete! Resources: 0 added, 0 changed, 5 destroyed.[0m
+
+# Шаг 6. Once Jenkins is running:
+	docker container ls
+	docker exec -it 73575a9ee4ac /bin/bash
+	
+
+[cloud_user@fas2c ~]$ docker container ls
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                               NAMES
+c41db7d3ff83        jenkins:terraform   "/sbin/tini -- /usr/…"   4 days ago          Up 24 minutes       0.0.0.0:8080->8080/tcp, 50000/tcp   jenkins
+
+[cloud_user@fas2c ~]$ docker exec -it c41db7d3ff83 /bin/bash
+	root@c41db7d3ff83:/# ls /var/jenkins_home/workspace/
+	DeployDockerService      DeployGhost           DestroyDockerService@tmp  PipelinePart1@tmp  PipelinePart2@tmp
+	DeployDockerService@tmp  DestroyDockerService  PipelinePart1             PipelinePart2
+
+	root@c41db7d3ff83:/# ls -a /var/jenkins_home/workspace/DestroyDockerService
+	.  ..  .git  .terraform  main.tf  networks.tf  terraform.tf  tfdestroyplan  variables.tf  volumes.tf
+
+	root@c41db7d3ff83:/# rm -rf /var/jenkins_home/workspace/DestroyDockerService/.terraform
+
+	root@c41db7d3ff83:/#  ls -a /var/jenkins_home/workspace/DestroyDockerService
+	.  ..  .git  main.tf  networks.tf  terraform.tf  tfdestroyplan  variables.tf  volumes.tf
+
+	root@c41db7d3ff83:/# exit
+	exit
+[cloud_user@fas2c ~]$

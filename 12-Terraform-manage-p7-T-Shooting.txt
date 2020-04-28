@@ -1,0 +1,59 @@
+						##### Troubleshooting #####
+###############
+#Troubleshooting Terraform Files#
+###############
+
+# We will talk about troubleshooting issues in the real world. Sometimes it's nothing more than "XYZ is broken. Go fix it!"
+
+Test your troubleshooting abilities:
+	cd ~/terraform
+	git clone https://github.com/linuxacademy/content-terraform-labs.git troubleshooting
+	cd troubleshooting
+	git checkout troubleshooting-aws
+	terraform init
+	
+###############
+#Lab 1: Troubleshooting a Terraform Deployment#
+###############	
+
+# Шаг 1. Fix `vpc_cidr`
+Edit variables.tf in the root module:
+	vi variables.tf
+
+Uncomment the following:
+variable "vpc_cidr" {}
+
+# Шаг 2. Fix `aws_key_pair.tf_auth`
+Edit main.tf in the compute module:
+	vi compute/main.tf
+
+The aws_key_pair is called tf-auth. There is a typo in key_name = "${aws_key_pair.tf_auth.id}" — tf_auth should have a dash instead of an underscore:
+	key_name = "${aws_key_pair.tf-auth.id}"
+
+# Шаг 3. Fix the Issue with `public_sg`
+The issue here is the outputs file of the networking module. Let's fix that:	
+	vi networking/outputs.tf
+
+Uncomment this:
+
+output "public_sg" {
+  value = "${aws_security_group.tf_public_sg.id}"
+}
+
+# Шаг 4. Fix `public_cidrs`
+Edit the variables file in the root module:
+	vi variables.tf
+
+Change the map to a list:
+
+variable "public_cidrs" {
+  type = "list"
+}
+
+# Шаг 5. Create an SSH Key
+Generate an SSH key for the EC2 instances:
+	ssh-keygen
+
+# Шаг 6. Deploy the Resources to AWS
+After fixing all the issues, deploy the resources to AWS:
+	terraform apply -auto-approve

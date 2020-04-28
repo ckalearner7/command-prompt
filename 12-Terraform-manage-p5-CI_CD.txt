@@ -1,0 +1,337 @@
+						##### Using Terraform in a CI/CD Environment #####
+###############
+#Building a Custom Jenkins Image#
+###############
+# Материалы:
+https://github.com/jenkinsci/docker/blob/master/Dockerfile
+https://hub.docker.com/r/jenkins/jenkins/
+
+# We will learn how to build a Jenkins Docker image that has Docker and Terraform baked in. We will be using this image throughout the remainder of this section.
+
+# Шаг 1. Setup the environment:
+	mkdir -p jenkins
+	
+[cloud_user@fas2c terraform]$ mkdir -p jenkins
+[cloud_user@fas2c terraform]$ cd jenkins/
+[cloud_user@fas2c jenkins]$
+	
+# Шаг 2. Create Dockerfile:
+	vi Dockerfile
+
+#Базовый образ с DockerHub
+FROM jenkins/jenkins:lts
+#Меняем пользователя с jenkins на root
+USER root 
+#Устанавливаем дополнительные пакеты
+RUN apt-get update -y && apt-get -y install apt-transport-https ca-certificates curl gnupg-agent software-properties-common
+#Устанавливаем GPG-ключи для Docker
+RUN curl -fsSL https://download.docker.com/linux/$(. /etc/os-release; echo "$ID")/gpg > /tmp/dkey; apt-key add /tmp/dkey
+#Устанавливаем репозиторий Docker
+RUN add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/$(. /etc/os-release; echo "$ID") $(lsb_release -cs) stable"
+#Устанавливаем Docker
+RUN apt-get update -y
+RUN apt-get install -y docker-ce docker-ce-cli containerd.io
+#Устанавливаем Terraform
+RUN curl -O https://releases.hashicorp.com/terraform/0.11.13/terraform_0.11.13_linux_amd64.zip && unzip terraform_0.11.13_linux_amd64.zip -d /usr/local/bin/
+#Меняем пользователя на jenkins (ользователь по умолчанию)
+USER ${user}
+
+# Шаг 3. Build the Image:
+	docker build -t jenkins:terraform .
+	
+[cloud_user@fas2c jenkins]$ docker build -t jenkins:terraform .
+Sending build context to Docker daemon   2.56kB
+Step 1/9 : FROM jenkins/jenkins:lts
+lts: Pulling from jenkins/jenkins
+3192219afd04: Pull complete
+17c160265e75: Pull complete
+cc4fe40d0e61: Pull complete
+9d647f502a07: Pull complete
+d108b8c498aa: Pull complete
+1bfe918b8aa5: Pull complete
+dafa1a7c0751: Pull complete
+204b3ae87dcc: Extracting [===========================>                       ]   11.7MB/21.32MB
+e7df9c239d2f: Download complete
+6bc3c4bab84d: Download complete
+0fddb90aaa59: Download complete
+f2fe379c9cae: Download complete
+41f205609aa3: Download complete
+44894459a77c: Download complete
+33abd1ee296e: Download complete
+0246d2531788: Download complete
+0265cbd0a929: Download complete
+ea9bcd7318c4: Download complete
+688e1959a331: Download complete
+
+# Шаг 4. List the Docker images:
+	docker image ls
+	
+[cloud_user@fas2c jenkins]$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED              SIZE
+jenkins             terraform           a6fd6d7ef6ff        About a minute ago   1.47GB
+jenkins/jenkins     lts                 7e250da768ed        3 weeks ago          619MB
+
+###############
+#Setting Up Jenkins#
+###############
+# We will take the Jenkins image we built in the previous lesson, and deploy a Docker container using Terraform.
+
+# Шаг 1. Edit main.tf:
+	vi main.tf
+
+# Jenkins Volume
+resource "docker_volume" "jenkins_volume" {
+  name = "jenkins_data"
+}
+
+# Start the Jenkins Container
+resource "docker_container" "jenkins_container" {
+  name  = "jenkins"
+  image = "jenkins:terraform"
+  ports {
+    internal = "8080"
+    external = "8080"
+  }
+
+  volumes {
+    volume_name    = "${docker_volume.jenkins_volume.name}"
+    container_path = "/var/jenkins_home"
+  }
+
+  volumes { # Это bind mount - то есть пробрасывем директорию локального хоста в директорию контейнера
+    host_path      = "/var/run/docker.sock"
+    container_path = "/var/run/docker.sock"
+  }
+}
+
+# /var/run/docker.sock - это служба, котороя запускается sudo systemctl start docker. 
+# В НАШЕМ СЛУЧАЕ ЭТА ШТУКА ПОЗВОЛЯЕТ КОНТЕЙНЕРУ С JENKINS УСТАНАВЛИВАТЬ КОНТЕЙНЕРЫ НА ХОСТЫ C ПОМОЩЬЮ TERRAFORM, КАК БУДТО JENKINS НЕ В DOCKER (то есть новые контейнеры будут добавлены на хосты)
+
+# Можно разрешать одним контейнерам управлять другими контейнерами (docker in docker). Таким образом получается, что на хост машине не будет установлено ничего, кроме docker'а. Делается это так:
+docker run -v /var/run/docker.sock:/var/run/docker.sock \
+       -v $(which docker):/bin/docker \
+       -ti ubuntu
+# http://jpetazzo.github.io/2015/09/03/do-not-use-docker-in-docker-for-ci/
+
+# Cлужба (демон) Docker использует UNIX сокет /var/run/docker.sock для входящих соединений API. Владельцем данного ресурса должен быть пользователь root. И никак иначе. Изменение прав доступа к этому сокету по сути равносильно предоставлению root-доступа к хостовой системе.
+# Также не следует шарить сокет /var/run/docker.sock с контейнерами, там где без этого можно обойтись, поскольку в таком случае компрометация сервиса в контейнере приведет к полному контролю над хостовой системой.
+
+# Шаг 2. Initialize Terraform:
+	terraform init
+	
+# Шаг 3. Plan the deployment:
+	terraform plan -out=tfplan
+	
+# Шаг 4. Deploy Jenkins:
+	terraform apply tfplan
+	
+# Шаг 5. Get the Admin password:
+	docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+	
+[cloud_user@fas2c jenkins]$ docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+db3b4b8628c94ef7bbe6c3fd6htd7
+
+# Шаг 6. Web GUI - Install suggested plugins
+
+###############
+#Creating a Jenkins Job#
+###############
+# We will start working with Jenkins by creating a simple build job. This job will deploy a Docker container using Terraform, list the container, and then destroy it.
+
+# Шаг 1. In the Jenkins dashboard, Click New Item.
+# Шаг 2. Select Freestyle Project, and enter an item name of DeployGhost. Click Ok.
+# Шаг 3. Under Source Code Management, select Git. Enter a Repository URL of https://github.com/linuxacademy/content-terraform-docker.git
+# Шаг 4. In the Build section, click Add build step and select Execute shell from the dropdown.
+# Шаг 5. Add the following in the Command area:
+terraform init
+terraform plan -out=tfplan
+terraform apply tfplan
+docker container ls
+terraform destroy -auto-approve
+# Шаг 6. Click Save.
+
+Now, if we click Build Now in the left-hand menu, our project will start building. Clicking the little dropdown arrow next to #1 will give us a menu. Select Console Output to watch things build. Once we get a Finished: SUCCESS message, we're done.
+
+###############
+#Building a Jenkins Pipeline Part 1#
+###############
+# We will create the first Jenkins Pipeline that will deploy out a Ghost blog.
+
+# Шаг 1. In the Jenkins dashboard, click New Item Enter an item name of PipelinePart1, and select Pipeline. Click Ok.
+# Шаг 2. Check the box for This project is parameterized. Click Add Parameter and select Choice Parameter. Give it a Name of action. For Choices, enter Deploy and Destroy, and make sure they are on separate lines. Enter The action that will be executed as the Description.
+# Шаг 3. Click Add Parameter and select Choice Parameter again. This time, name it image_name. Enter ghost:latest and ghost:alpine in the Choices box, making sure they are on separate lines. Enter The image Ghost Blog will deploy as a Description.
+# Шаг 4. Click Add Parameter a third time, and select String Parameter. Give it a Name of ext_port. Set the Default Value to 80. Enter The Public Port as the Description.
+# Шаг 5. Down in the Pipeline section, give a Definition of Pipeline script, and add the following to the Script:
+
+node {
+  git 'https://github.com/linuxacademy/content-terraform-docker.git'
+  if(action == 'Deploy') { # action - это просто имя для Choice Parameter
+    stage('init') {
+        sh """
+            terraform init
+        """
+    }
+    stage('plan') {
+      sh label: 'terraform plan', script: "terraform plan -out=tfplan -input=false -var image_name=${image_name} -var ext_port=${ext_port}"
+      script {
+          timeout(time: 10, unit: 'MINUTES') {
+              input(id: "Deploy Gate", message: "Deploy environment?", ok: 'Deploy')
+          }
+      }
+    }
+    stage('apply') {
+        sh label: 'terraform apply', script: "terraform apply -lock=false -input=false tfplan"
+    }
+  }
+
+  if(action == 'Destroy') {
+    stage('plan_destroy') {
+      sh label: 'terraform plan destroy', script: "terraform plan -destroy -out=tfdestroyplan -input=false -var image_name=${image_name} -var ext_port=${ext_port}"
+    }
+    stage('destroy') {
+      script {
+          timeout(time: 10, unit: 'MINUTES') {
+              input(id: "Destroy Gate", message: "Destroy environment?", ok: 'Destroy')
+          }
+      }
+      sh label: 'Destroy environment', script: "terraform apply -lock=false -input=false tfdestroyplan"
+    }
+  }
+}
+
+# Шаг 6. Click Save
+
+# В логах выполнения Job timeout выглядит так:
+[Pipeline] script
+[Pipeline] {
+[Pipeline] timeout
+Timeout set to expire in 10 min
+[Pipeline] {
+[Pipeline] input
+Deploy environment?
+Deploy or Abort # Здесь нужно подтвердить действие
+Approved by Test # Здесь будет показано, кто подтвердил
+[Pipeline] }
+
+# Если не ввести подтверждения, то задача остановится:
+Timeout set to expire in 1 min 0 sec
+[Pipeline] {
+[Pipeline] input
+Deploy environment?
+Deploy or Abort
+Cancelling nested steps due to timeout
+[Pipeline] }
+[Pipeline] // timeout
+[Pipeline] }
+[Pipeline] // script
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] }
+[Pipeline] // node
+[Pipeline] End of Pipeline
+Rejected by SYSTEM
+Finished: ABORTED
+
+###############
+#Building a Jenkins Pipeline Part 2#
+###############
+# We will create a Jenkins Pipeline to deploy out a Swarm service.
+
+# Шаг 1. In the Jenkins dashboard, click New Item Enter an item name of PipelinePart2, and select Pipeline. Click Ok.
+# Шаг 2. Check the box for This project is parameterized. Click Add Parameter and select Choice Parameter. Give it a Name of action. For Choices, enter Deploy and Destroy, and make sure they are on separate lines. Enter The action that will be executed as the Description.
+# Шаг 3. Click Add Parameter and select Choice Parameter again. This time, name it image_name. Enter ghost:latest and ghost:alpine in the Choices box, making sure they are on separate lines. Enter The image Ghost Blog will deploy as a Description.
+# Шаг 4. Click Add Parameter a third time, and select String Parameter. Give it a Name of ghost_ext_port. Set the Default Value to 80. Enter The Public Port as the Description.
+# Шаг 5. Down in the Pipeline section, give a Definition of Pipeline script, and add the following to the Script:
+
+node {
+  git 'https://github.com/linuxacademy/content-terraform-docker-service.git'
+  if(action == 'Deploy') {
+    stage('init') {
+      sh label: 'terraform init', script: "terraform init"
+    }
+    stage('plan') {
+      sh label: 'terraform plan', script: "terraform plan -out=tfplan -input=false -var image_name=${image_name} -var ghost_ext_port=${ghost_ext_port}"
+      script {
+          timeout(time: 10, unit: 'MINUTES') {
+            input(id: "Deploy Gate", message: "Deploy environment?", ok: 'Deploy')
+          }
+      }
+    }
+    stage('apply') {
+      sh label: 'terraform apply', script: "terraform apply -lock=false -input=false tfplan"
+    }
+  }
+
+  if(action == 'Destroy') {
+    stage('plan_destroy') {
+      sh label: 'terraform plan', script: "terraform plan -destroy -out=tfdestroyplan -input=false -var image_name=${image_name} -var ghost_ext_port=${ghost_ext_port}"
+    }
+    stage('destroy') {
+      script {
+          timeout(time: 10, unit: 'MINUTES') {
+              input(id: "Destroy Gate", message: "Destroy environment?", ok: 'Destroy')
+          }
+      }
+      sh label: 'terraform apply', script: "terraform apply -lock=false -input=false tfdestroyplan"
+    }
+    stage('cleanup') {
+      sh label: 'cleanup', script: "rm -rf terraform.tfstat"
+    }
+  }
+}
+# Шаг 6. Click Save
+
+###############
+#Building a Jenkins Pipeline Part 3#
+###############
+# We will complete working with Jenkins by creating a pipeline that will create a MySQL Swarm service that uses Docker Secrets.
+
+# Шаг 1. In the Jenkins dashboard, click New Item Enter an item name of PipelinePart3, and select Pipeline. Click Ok.
+# Шаг 2. Check the box for This project is parameterized. Click Add Parameter and select Choice Parameter. Give it a Name of action. For Choices, enter Deploy and Destroy, and make sure they are on separate lines. Enter The action that will be executed as the Description.
+# Шаг 3. Click Add Parameter and select String Parameter. For the name, enter mysql_root_password.. Enter P4ssW0rd0! in the Default Value box. Enter MySQL root password. as a Description.
+# Шаг 4. For the next parameter, click Add Parameter once more and select String Parameter. For the name, enter mysql_user_password.. Enter paSsw0rd0! in the Default Value box. Enter MySQL user password. as a Description.
+# Шаг 5. Down in the Pipeline section, give a Definition of Pipeline script, and add the following to the Script:
+
+node {
+  git 'https://github.com/linuxacademy/content-terraform-docker-secrets.git'
+  if(action == 'Deploy') {
+    stage('init') {
+      sh label: 'terraform init', script: "terraform init"
+    }
+    stage('plan') {
+      def ROOT_PASSWORD = sh (returnStdout: true, script: """echo ${mysql_root_password} | base64""").trim()
+      def USER_PASSWORD = sh (returnStdout: true, script: """echo ${mysql_user_password} | base64""").trim()
+      sh label: 'terraform plan', script: "terraform plan -out=tfplan -input=false -var mysql_root_password=${ROOT_PASSWORD} -var mysql_db_password=${USER_PASSWORD}"
+      script {
+          timeout(time: 10, unit: 'MINUTES') {
+              input(id: "Deploy Gate", message: "Deploy ${params.project_name}?", ok: 'Deploy')
+          }
+      }
+    }
+    stage('apply') {
+      sh label: 'terraform apply', script: "terraform apply -lock=false -input=false tfplan"
+    }
+  }
+
+  if(action == 'Destroy') {
+    stage('plan_destroy') {
+      def ROOT_PASSWORD = sh (returnStdout: true, script: """echo ${mysql_root_password} | base64""").trim() # Шифрует пароль
+      def USER_PASSWORD = sh (returnStdout: true, script: """echo ${mysql_user_password} | base64""").trim() # Шифрует пароль
+      sh label: 'terraform plan', script: "terraform plan -destroy -out=tfdestroyplan -input=false -var mysql_root_password=${ROOT_PASSWORD} -var mysql_db_password=${USER_PASSWORD}"
+    }
+    stage('destroy') {
+      script {
+          timeout(time: 10, unit: 'MINUTES') {
+              input(id: "Destroy Gate", message: "Destroy ${params.project_name}?", ok: 'Destroy')
+          }
+      }
+      sh label: 'terraform apply', script: "terraform apply -lock=false -input=false tfdestroyplan"
+    }
+    stage('cleanup') {
+      sh label: 'cleanup', script: "rm -rf terraform.tfstat"
+    }
+  }
+}
+# Шаг 6. Click Save
+
+# Минус такого решения в том, что введенный пароль будет отображаться в логах выполнения Job

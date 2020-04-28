@@ -1,0 +1,94 @@
+						##### Setting Up Your Environment #####
+###############
+#Architecture#
+###############
+# Материалы:
+https://www.terraform.io/downloads.html
+
+We'll create two Cloud Servers, using the information below:
+
+Swarm Manager ([cloud_user@fas2c ~]$):
+	Distribution: CentOS 7
+	Tag: Docker Swarm Manager
+
+Swarm Worker ([cloud_user@fas4c ~]$):
+	Distribution: CentOS 7
+	Tag: Docker Swarm Worker
+	
+###############
+#Setting up Docker Installing Terraform#
+###############
+
+# Шаг 1. Installing Docker on the Swarm Manager and Worker
+### ALL NODES ###
+
+	# Шаг 1.1. Update the operating system
+		sudo yum update -y
+
+	# Шаг 1.2. Prerequisites
+		Uninstall old versions:
+			sudo yum remove -y docker \
+							  docker-client \
+							  docker-client-latest \
+							  docker-common \
+							  docker-latest \
+							  docker-latest-logrotate \
+							  docker-logrotate \
+							  docker-engine
+
+	# Шаг 1.3. Install Docker CE
+		Install Utils:
+			sudo yum install -y yum-utils \
+			  device-mapper-persistent-data \
+			  lvm2
+
+	# Шаг 1.4. Add the Docker repository:
+		sudo yum-config-manager \
+			--add-repo \
+			https://download.docker.com/linux/centos/docker-ce.repo
+
+	# Шаг 1.5. Install Docker CE:
+		sudo yum -y install docker-ce
+
+	# Шаг 1.6. Start Docker and enable it:
+		sudo systemctl start docker && sudo systemctl enable docker
+
+	# Шаг 1.7. Add cloud_user to the docker group:
+		sudo usermod -aG docker cloud_user
+
+	# Шаг 1.8. Test the Docker installation:
+		docker --version
+
+	# Шаг 1.9. Configuring Swarm Manager node
+	### ONLY MANAGER NODE###
+	docker swarm init \
+	--advertise-addr [PRIVATE_IP]
+
+	# Шаг 1.10. Configure the Swarm Worker node
+	### ONLY WORKER NODE###
+	On the worker node, add the worker to the cluster:
+		docker swarm join --token [TOKEN] \
+		[PRIVATE_IP]:2377
+		
+		# У меня: docker swarm join --token SWMTKN-1-1ae0r4z5h9zk3dpjzs4ih1xwvbtf3law3opli7cf23axbu7v7d-8p31mo2xn93hvfylk4zy4rlqz 172.31.100.200:2377
+
+	# Шаг 1.11. Verify the Swarm cluster
+		List Swarm nodes:
+			docker node ls
+			
+			[cloud_user@fas2c ~]$ docker node ls
+			ID                            HOSTNAME                       STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+			6a6h9ji4leep8cayws74o6uyz *   fas2c.mylabserver.com   Ready               Active              Leader              19.03.8
+			nr787w4c7ndq224ezlevd9w4g     fas4c.mylabserver.com   Ready               Active                                  19.03.8
+
+
+# Шаг 2. Install Terraform
+	# Шаг 2.1.Install Terraform 0.11.13 on the Swarm manager:
+		sudo curl -O https://releases.hashicorp.com/terraform/0.11.13/terraform_0.11.13_linux_amd64.zip
+		sudo yum install -y unzip
+		sudo unzip terraform_0.11.13_linux_amd64.zip -d /usr/local/bin/
+	
+	# Шаг 2.2. Test the Terraform installation:
+		terraform version
+
+	

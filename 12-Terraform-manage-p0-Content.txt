@@ -1,0 +1,105 @@
+###############
+#Course Introduction#
+###############
+Introduction
+	About This Course
+	About the Instructor
+	About Terraform
+
+Setting Up Your Environment
+	Using Cloud Playground
+	Setting up Docker Installing Terraform
+
+Terraform Basics
+	Terraform Commands
+	HashiCorp Configuration Language
+	Tainting and Updating Resources
+	Terraform Console and Output
+	Input Variables
+	Breaking Out Our Variables and Outputs
+	Maps and Lookups
+	Terraform Workspaces
+	Null Resources and Local-exec
+	Hands-On Lab:
+		Deploying Docker Images Using Terraform
+	Hands-On Lab:
+		Working with Terraform Variables
+	Hands-On Lab:
+		Using Terraform Maps and Workspaces to Deploy Multiple Environments
+
+Terraform Modules
+	Introduction to Modules
+	The Image Module
+	The Container Module
+	The Root Module
+	Hands-On Lab:
+		Creating a Ghost Blog Terraform Module
+
+Terraform and Docker
+	Managing Docker Networks
+	Managing Docker Volumes
+	Creating Swarm Services
+	Using Secrets
+	Hands-On Lab:
+		Using Terraform to Create a Docker Volume and Network
+	Hands-On Lab:
+		Deploying a Swarm Service Using Terraform
+
+Using Terraform in a CI/CD Environment
+	Building a Custom Jenkins Image
+	Setting Up Jenkins
+	Creating a Jenkins Job
+	Building a Jenkins Pipeline Part 1
+	Building a Jenkins Pipeline Part 2
+	Building a Jenkins Pipeline Part 3
+	Hands-On Lab:
+		Building a CI/CD Pipeline Using Terraform
+
+Terraform and AWS
+	Setting Up a Cloud Sandbox
+	Our Architecture: What We're Going to Build
+	Storage Part 1: The S3 Bucket and Random ID
+	Storage Part 2: The Root Module
+	Networking Part 1: VPC, IGW, and Route Tables
+	Networking Part 2: Subnets, Security, and the Count Attribute
+	Networking Part 3: Variables and Outputs
+	Networking Part 4: The Root Module
+	Compute Part 1: AMI Data, Key Pair, and the File Function
+	Compute Part 2: The EC2 Instance
+	Compute Part 3: The Root Module
+	Hands-On Lab:
+		Using Terraform to Create a RandomID and S3 Buckets
+	Hands-On Lab:
+		Using Join and Count to Create Multiple S3 Buckets
+	Hands-On Lab:
+		Using Template Files and File Function to Deploy EC2 Instances
+
+Troubleshooting
+	Troubleshooting Terraform Files
+	Hands-On Lab:
+		Troubleshooting a Terraform Deployment
+
+Terraform State
+	Terraform Formatting and Remote State
+	Using Remote State with Jenkins
+
+Terraform and Kubernetes
+	Setting up Kubernetes Installing Terraform
+	Creating a Pod
+	Creating a Pod and Service
+	Creating a Deployment
+	Hands-On Lab:
+		Creating a Pod and Service with Terraform
+	Hands-On Lab:
+		Using Terraform to Create a Kubernetes Deployment
+
+Terraform 0.12
+	Setup and Disclaimer
+	Working with Resources
+	Input Variables
+	Output Values
+	Dynamic Nested Blocks Part 1
+	Dynamic Nested Blocks Part 2
+	Expressions and Functions
+	Hands-On Lab:
+		Using Terraform 0.12 Beta

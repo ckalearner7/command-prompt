@@ -1,0 +1,195 @@
+						##### Terraform Modules #####
+###############
+#Introduction to Modules#
+###############
+# Шаг 1. Set up the environment:
+	cd terraform/basics
+	mkdir -p modules/image
+	mkdir -p modules/container
+	
+# Шаг 2. Create files for the image:
+	cd ~/terraform/basics/modules/image
+	touch main.tf variables.tf outputs.tf
+
+# Шаг 3. Create files for container:
+	cd ~/terraform/basics/modules/container
+	touch main.tf variables.tf outputs.tf
+	
+###############
+#The Image Module#
+###############
+# Шаг 1. Go to the image directory:
+	cd ~/terraform/basics/modules/image
+
+# Шаг 2. Edit main.tf:
+	vi main.tf
+
+# Download the Image
+resource "docker_image" "image_id" {
+  name = "${var.image_name}"
+}
+
+# Шаг 3. Edit variables.tf:
+	vi variables.tf
+
+variable "image_name" {
+  description = "Name of the image"
+}
+
+# Шаг 4. Edit outputs.tf:
+	vi outputs.tf
+
+output "image_out" {
+  value       = "${docker_image.image_id.latest}"
+}
+
+# Шаг 5. Initialize Terraform:
+	terraform init
+
+# Шаг 6. Create the image plan:
+	terraform plan -out=tfplan -var 'image_name=ghost:alpine'
+
+# Шаг 7. Deploy the image using the plan:
+	terraform apply -auto-approve tfplan
+
+# Шаг 8. Destroy the image:
+	terraform destroy -auto-approve -var 'image_name=ghost:alpine'
+	
+###############
+#The Container Module#
+###############
+# Шаг 1. Go to the container directory:
+	cd ~/terraform/basics/modules/container
+	
+# Шаг 2. Edit main.tf:
+	vi main.tf
+
+# Start the Container
+resource "docker_container" "container_id" {
+  name  = "${var.container_name}"
+  image = "${var.image}"
+  ports {
+    internal = "${var.int_port}"
+    external = "${var.ext_port}"
+  }
+}
+
+# Шаг 3. Edit variables.tf:
+	vi variables.tf
+
+#Define variables
+variable "container_name" {}
+variable "image" {}
+variable "int_port" {}
+variable "ext_port" {}
+
+# Шаг 4. Edit outputs.tf:
+	vi outputs.tf
+
+#Output the IP Address of the Container
+output "ip" {
+  value = "${docker_container.container_id.ip_address}"
+}
+
+output "container_name" {
+  value = "${docker_container.container_id.name}"
+}
+
+# Шаг 5. Initialize:
+	terraform init
+
+# Шаг 6. Create the image plan:
+	terraform plan -out=tfplan -var 'container_name=blog' -var 'image=ghost:alpine' -var 'int_port=2368' -var 'ext_port=80'
+
+# Шаг 7. Deploy container using the plan:
+	terraform apply tfplan
+	
+###############
+#The Root Module#
+###############
+# Шаг 1. Go to the module directory:
+	cd ~/terraform/basics/modules/
+	touch {main.tf,variables.tf,outputs.tf}
+	
+[cloud_user@fas2c modules]$ tree
+.
+├── container
+│   ├── main.tf
+│   ├── outputs.tf
+│   ├── terraform.tfstate
+│   ├── terraform.tfstate.backup
+│   ├── tfplan
+│   └── variables.tf
+├── image
+│   ├── main.tf
+│   ├── outputs.tf
+│   ├── terraform.tfstate
+│   ├── terraform.tfstate.backup
+│   ├── tfplan
+│   └── variables.tf
+├── main.tf
+├── outputs.tf
+└── variables.tf
+
+# Шаг 2. Edit main.tf:
+	vi main.tf
+
+# Download the image
+module "image" {
+  source = "./image"
+  image_name  = "${var.image_name}"
+}
+
+# Start the container
+module "container" {
+  source             = "./container"
+  image              = "${module.image.image_out}"
+  container_name     = "${var.container_name}"
+  int_port           = "${var.int_port}"
+  ext_port           = "${var.ext_port}"
+}
+
+# Шаг 3. Edit variables.tf:
+	vi variables.tf
+
+#Define variables
+variable "container_name" {
+  description = "Name of the container."
+  default     = "blog"
+}
+variable "image_name" {
+  description = "Image for container."
+  default     = "ghost:latest"
+}
+variable "int_port" {
+  description = "Internal port for container."
+  default     = "2368"
+}
+variable "ext_port" {
+  description = "External port for container."
+  default     = "80"
+}
+
+# Шаг 4. Edit outputs.tf:
+	vi outputs.tf
+
+#Output the IP Address of the Container
+output "ip" {
+  value = "${module.container.ip}"
+}
+
+output "container_name" {
+  value = "${module.container.container_name}"
+}
+
+# Шаг 5. Initialize Terraform:
+	terraform init
+
+# Шаг 6. Create the image plan:
+	terraform plan -out=tfplan
+
+# Шаг 7. Deploy the container using the plan:
+	terraform apply tfplan
+
+# Шаг 8. Destroy the deployment:
+	terraform destroy -auto-approve

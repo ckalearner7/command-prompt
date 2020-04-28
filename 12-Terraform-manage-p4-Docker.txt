@@ -1,0 +1,838 @@
+						##### Terraform and Docker #####
+###############
+#Managing Docker Networks#
+###############
+
+# We will build on our knowledge of Terraform and Docker by learning about the docker_network resource.
+
+# Шаг 1. Set up the environment:
+	mkdir -p ~/terraform/docker/networks
+	cd terraform/docker/networks
+
+# Шаг 2. Create the files:
+	touch {variables.tf,image.tf,network.tf,main.tf}
+
+# Шаг 3. Edit variables.tf:
+	vi variables.tf
+
+variable "mysql_root_password" {
+  description = "The MySQL root password."
+  default     = "P4sSw0rd0!"
+}
+
+variable "ghost_db_username" {
+  description = "Ghost blog database username."
+  default     = "root"
+}
+
+variable "ghost_db_name" {
+  description = "Ghost blog database name."
+  default     = "ghost"
+}
+
+variable "mysql_network_alias" {
+  description = "The network alias for MySQL."
+  default     = "db"
+}
+
+variable "ghost_network_alias" {
+  description = "The network alias for Ghost"
+  default     = "ghost"
+}
+
+variable "ext_port" {
+  description = "Public port for Ghost"
+  default     = "8080"
+}
+
+# Шаг 4. Edit image.tf:
+	vi image.tf
+
+resource "docker_image" "ghost_image" {
+  name = "ghost:alpine"
+}
+
+resource "docker_image" "mysql_image" {
+  name = "mysql:5.7"
+}
+
+# Шаг 5. Edit network.tf:
+	vi network.tf
+
+resource "docker_network" "public_bridge_network" {
+  name   = "public_ghost_network"
+  driver = "bridge"
+}
+
+resource "docker_network" "private_bridge_network" {
+  name     = "ghost_mysql_internal"
+  driver   = "bridge"
+  internal = true
+}
+
+# Шаг 6. Edit main.tf:
+	vi main.tf
+
+resource "docker_container" "blog_container" {
+  name  = "ghost_blog"
+  image = "${docker_image.ghost_image.name}"
+  env   = [
+    "database__client=mysql",
+    "database__connection__host=${var.mysql_network_alias}",
+    "database__connection__user=${var.ghost_db_username}",
+    "database__connection__password=${var.mysql_root_password}",
+    "database__connection__database=${var.ghost_db_name}"
+  ]
+  ports {
+    internal = "2368"
+    external = "${var.ext_port}"
+  }
+  networks_advanced { # Сетевой адаптер 1
+    name    = "${docker_network.public_bridge_network.name}"
+    aliases = ["${var.ghost_network_alias}"]
+  }
+  networks_advanced { # Сетевой адаптер 2
+    name    = "${docker_network.private_bridge_network.name}"
+    aliases = ["${var.ghost_network_alias}"]
+  }
+}
+
+resource "docker_container" "mysql_container" {
+  name  = "ghost_database"
+  image = "${docker_image.mysql_image.name}"
+  env   = [
+    "MYSQL_ROOT_PASSWORD=${var.mysql_root_password}"
+  ]
+  networks_advanced {
+    name    = "${docker_network.private_bridge_network.name}"
+    aliases = ["${var.mysql_network_alias}"]
+  }
+}
+
+# Шаг 7. Initialize Terraform:
+	terraform init
+
+# Шаг 8. Validate the files:
+	terraform validate
+
+# Шаг 9. Build a plan:
+	terraform plan -out=tfplan -var 'ext_port=8082'
+
+# Шаг 10. Apply the plan:
+	terraform apply tfplan
+
+# Шаг 11. Destroy the environment:
+	terraform destroy -auto-approve -var 'ext_port=8082'
+
+# Проверка
+[cloud_user@fas2c networks]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED              STATUS              PORTS               NAMES
+eaef68c4302d        mysql:5.7           "docker-entrypoint.s…"   About a minute ago   Up About a minute                       ghost_database
+[cloud_user@fas2c networks]$ docker ps -a
+\CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS                       PORTS               NAMES
+eaef68c4302d        mysql:5.7           "docker-entrypoint.s…"   3 minutes ago       Up 3 minutes                                     ghost_database
+c56273cae91d        ghost:alpine        "docker-entrypoint.s…"   4 minutes ago       Exited (255) 4 minutes ago                       ghost_blog
+       mysql:5.7           "docker-entrypoint.s…"   About a minute ago   Up About a minute                       ghost_database
+
+# Работает только один контейнер с базой, хотя создались оба
+
+[cloud_user@fas2c networks]$ docker container start ghost_blog
+ghost_blog
+[cloud_user@fas2c networks]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                    NAMES
+eaef68c4302d        mysql:5.7           "docker-entrypoint.s…"   6 minutes ago       Up 6 minutes                                 ghost_database
+c56273cae91d        ghost:alpine        "docker-entrypoint.s…"   6 minutes ago       Up 4 seconds        0.0.0.0:8082->2368/tcp   ghost_blog
+
+# Вручную можно поднять контейнер с клиентом - ghost_blog. Причина в том, что контейнер ghost_blog стартует раньше ghost_database, не видит базы и падает.
+
+# Шаг 12. Fixing main.tf
+	main.tf contents:
+
+resource "docker_container" "mysql_container" { # Ставим на первое место
+  name  = "ghost_database"
+  image = "${docker_image.mysql_image.name}"
+  env   = [
+    "MYSQL_ROOT_PASSWORD=${var.mysql_root_password}"
+  ]
+  networks_advanced {
+    name    = "${docker_network.private_bridge_network.name}"
+    aliases = ["${var.mysql_network_alias}"]
+  }
+}
+
+resource "null_resource" "sleep" { # Добавляем задержку
+  depends_on = ["docker_container.mysql_container"]
+  provisioner "local-exec" {
+    command = "sleep 15s"
+  }
+}
+
+resource "docker_container" "blog_container" {
+  name  = "ghost_blog"
+  image = "${docker_image.ghost_image.name}"
+  depends_on = ["null_resource.sleep", "docker_container.mysql_container"] # Проверяем, что первые два действия выполнились
+  env   = [
+    "database__client=mysql",
+    "database__connection__host=${var.mysql_network_alias}",
+    "database__connection__user=${var.ghost_db_username}",
+    "database__connection__password=${var.mysql_root_password}",
+    "database__connection__database=${var.ghost_db_name}"
+  ]
+  ports {
+    internal = "2368"
+    external = "${var.ext_port}"
+  }
+  networks_advanced {
+    name    = "${docker_network.public_bridge_network.name}"
+    aliases = ["${var.ghost_network_alias}"]
+  }
+  networks_advanced {
+    name    = "${docker_network.private_bridge_network.name}"
+    aliases = ["${var.ghost_network_alias}"]
+  }
+}
+
+# Шаг 13. Build a plan:
+	terraform plan -out=tfplan -var 'ext_port=8082'
+
+# Шаг 14. Apply the plan:
+	terraform apply tfplan
+	
+# Оба контейнера сразу заработали
+	
+[cloud_user@fas2c networks]$ docker network ls
+NETWORK ID          NAME                   DRIVER              SCOPE
+36f7d9a3506a        bridge                 bridge              local
+e58d1e046c26        docker_gwbridge        bridge              local
+730da1feaffa        ghost_mysql_internal   bridge              local # Внутренняя сеть
+9e02d23e57de        host                   host                local
+ke4lbt7b98u4        ingress                overlay             swarm
+de9e419f80dd        none                   null                local
+5e63f44f803a        public_ghost_network   bridge              local # Внешняя сеть
+
+[cloud_user@fas2c networks]$ docker container inspect ghost_blog
+...
+ "Networks": {
+                "ghost_mysql_internal": {
+                    "IPAMConfig": {},
+                    "Links": null,
+                    "Aliases": [
+                        "ghost",
+                        "2eff6ebe560a"
+                    ],
+                    "NetworkID": "730da1feaffa697efa60a72b03250698066aed83b52a76fbf39fdc2df9b74a2b",
+                    "EndpointID": "50bbf2ba19751376bcfa535bc378eda6ee118e2c07c888854f3d196e5bd04557",
+                    "Gateway": "172.20.0.1",
+                    "IPAddress": "172.20.0.3",
+                    "IPPrefixLen": 16,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "MacAddress": "02:42:ac:14:00:03",
+                    "DriverOpts": null
+                },
+                "public_ghost_network": {
+                    "IPAMConfig": {},
+                    "Links": null,
+                    "Aliases": [
+                        "ghost",
+                        "2eff6ebe560a"
+                    ],
+                    "NetworkID": "5e63f44f803a99481b7bcea7fd58aa9f85e15081830d79e5cabd047702299c25",
+                    "EndpointID": "6be1dcc85f48925e092860594d0ecc842fe5166041bcaa47f76e043a22c46919",
+                    "Gateway": "172.19.0.1",
+                    "IPAddress": "172.19.0.2",
+                    "IPPrefixLen": 16,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "MacAddress": "02:42:ac:13:00:02",
+                    "DriverOpts": null
+                }
+
+###############
+#Managing Docker Volumes#
+###############
+# We will add a volume to our Ghost Blog/MySQL setup.
+
+# Шаг 1. Destroy the existing environment:
+	terraform destroy -auto-approve -var 'ext_port=8082'
+
+# Шаг 2. Setup an environment:
+	cp -r ~/terraform/docker/networks ~/terraform/docker/volumes
+	cd ../volumes/
+	
+# Шаг 3. Create volumes.tf:
+	vi volumes.tf
+
+resource "docker_volume" "mysql_data_volume" {
+  name = "mysql_data"
+}
+
+# Шаг 4. Edit main.tf:
+	vi main.tf
+
+resource "docker_container" "mysql_container" {
+  name  = "ghost_database"
+  image = "${docker_image.mysql_image.name}"
+  env   = [
+    "MYSQL_ROOT_PASSWORD=${var.mysql_root_password}"
+  ]
+  volumes {
+    volume_name    = "${docker_volume.mysql_data_volume.name}"
+    container_path = "/var/lib/mysql"
+  }
+  networks_advanced {
+    name    = "${docker_network.private_bridge_network.name}"
+    aliases = ["${var.mysql_network_alias}"]
+  }
+}
+
+resource "null_resource" "sleep" {
+  depends_on = ["docker_container.mysql_container"]
+  provisioner "local-exec" {
+    command = "sleep 15s"
+  }
+}
+
+resource "docker_container" "blog_container" {
+  name  = "ghost_blog"
+  image = "${docker_image.ghost_image.name}"
+  depends_on = ["null_resource.sleep", "docker_container.mysql_container"]
+  env   = [
+    "database__client=mysql",
+    "database__connection__host=${var.mysql_network_alias}",
+    "database__connection__user=${var.ghost_db_username}",
+    "database__connection__password=${var.mysql_root_password}",
+    "database__connection__database=${var.ghost_db_name}"
+  ]
+  ports {
+    internal = "2368"
+    external = "${var.ext_port}"
+  }
+  networks_advanced {
+    name    = "${docker_network.public_bridge_network.name}"
+    aliases = ["${var.ghost_network_alias}"]
+  }
+  networks_advanced {
+    name    = "${docker_network.private_bridge_network.name}"
+    aliases = ["${var.ghost_network_alias}"]
+  }
+}
+
+# Шаг 5. Initialize Terraform:
+	terraform init
+
+# Шаг 6. Validate the files:
+	terraform validate
+
+# Шаг 7. Build a plan:
+	terraform plan -out=tfplan -var 'ext_port=8082'
+
+# Шаг 8. Apply the plan:
+	terraform apply tfplan
+
+# Шаг 9. List Docker volumes:
+	docker volume inspect mysql_data
+	
+[cloud_user@fas2c volumes]$ docker volume inspect mysql_data
+[
+    {
+        "CreatedAt": "2020-04-20T05:55:28Z",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/mysql_data/_data",
+        "Name": "mysql_data",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+
+
+# Шаг 10. List the data in mysql_data (просмотри содержимого /var/lib/mysql в контейнере): 
+sudo ls /var/lib/docker/volumes/mysql_data/_data
+
+[cloud_user@fas2c volumes]$ sudo ls /var/lib/docker/volumes/mysql_data/_data
+[sudo] password for cloud_user:
+auto.cnf    ca.pem           client-key.pem  ib_buffer_pool  ib_logfile0  ibtmp1  performance_schema  public_key.pem   server-key.pem
+ca-key.pem  client-cert.pem  ghost           ibdata1         ib_logfile1  mysql   private_key.pem     server-cert.pem  sys
+
+
+# Шаг 11. Destroy the environment:
+	terraform destroy -auto-approve -var 'ext_port=8082'
+
+###############
+#Creating Swarm Services#
+###############
+# Swarm кластер уже собран
+# В случае Swarm нет проблемы в том, что сначала нужно создать контейнер с базой, как в предыдущих примерах
+
+# We will convert our Ghost and MySQL containers over to using Swarm services. Swarm services are a more production-ready way of running containers.
+
+# Шаг 1. Setup the environment:
+	cp -r volumes/ services
+	cd services
+	
+[cloud_user@fas2c docker]$ ls
+networks  volumes
+[cloud_user@fas2c docker]$ cp -r volumes/ services
+[cloud_user@fas2c docker]$ cd services
+[cloud_user@fas2c services]$ ls
+image.tf  main.tf  network.tf  terraform.tfstate  terraform.tfstate.backup  tfplan  variables.tf  volumes.tf
+
+# Шаг 2. variables.tf contents:
+
+variable "mysql_root_password" {
+  description = "The MySQL root password."
+  default     = "P4sSw0rd0!"
+}
+
+variable "ghost_db_username" {
+  description = "Ghost blog database username."
+  default     = "root"
+}
+
+variable "ghost_db_name" {
+  description = "Ghost blog database name."
+  default     = "ghost"
+}
+
+variable "mysql_network_alias" {
+  description = "The network alias for MySQL."
+  default     = "db"
+}
+
+variable "ghost_network_alias" {
+  description = "The network alias for Ghost"
+  default     = "ghost"
+}
+
+variable "ext_port" {
+  description = "The public port for Ghost"
+}
+
+# Шаг 3. images.tf contents:
+
+resource "docker_image" "ghost_image" {
+  name = "ghost:alpine"
+}
+
+resource "docker_image" "mysql_image" {
+  name = "mysql:5.7"
+}
+
+# Шаг 4. network.tf contents:
+
+resource "docker_network" "public_bridge_network" {
+  name   = "public_network"
+  driver = "overlay" # Изменился тип сети для Swarm (раньше был bridge)
+}
+
+resource "docker_network" "private_bridge_network" {
+  name     = "mysql_internal"
+  driver   = "overlay" # # Изменился тип сети для Swarm (раньше был bridge)
+  internal = true
+}
+
+# Шаг 5. volumes.tf contents:
+
+resource "docker_volume" "mysql_data_volume" {
+  name = "mysql_data"
+}
+
+# Шаг 6. main.tf contents:
+
+resource "docker_service" "ghost-service" {
+  name = "ghost"
+
+  task_spec {
+    container_spec {
+      image = "${docker_image.ghost_image.name}"
+
+      env {
+         database__client               = "mysql"
+         database__connection__host     = "${var.mysql_network_alias}"
+         database__connection__user     = "${var.ghost_db_username}"
+         database__connection__password = "${var.mysql_root_password}"
+         database__connection__database = "${var.ghost_db_name}"
+      }
+    }
+    networks = [
+      "${docker_network.public_bridge_network.name}",
+      "${docker_network.private_bridge_network.name}"
+    ]
+  }
+
+  endpoint_spec {
+    ports {
+      target_port    = "2368"
+      published_port = "${var.ext_port}"
+    }
+  }
+}
+
+resource "docker_service" "mysql-service" {
+  name = "${var.mysql_network_alias}"
+
+  task_spec {
+    container_spec {
+      image = "${docker_image.mysql_image.name}"
+
+      env {
+        MYSQL_ROOT_PASSWORD = "${var.mysql_root_password}"
+      }
+
+      mounts = [
+        {
+          target = "/var/lib/mysql"
+          source = "${docker_volume.mysql_data_volume.name}"
+          type   = "volume"
+        }
+      ]
+    }
+    networks = ["${docker_network.private_bridge_network.name}"]
+  }
+}
+
+# Шаг 7. Initialize Terraform:	
+	terraform init
+
+# Шаг 8. Validate the files:
+	terraform validate
+
+# Шаг 9. Build a plan:
+	terraform plan -out=tfplan -var 'ext_port=8082'
+
+# Шаг 10. Apply the plan:
+	terraform apply tfplan
+	docker service ls
+	docker container ls
+	
+#Master
+[cloud_user@fas2c services]$ docker service ls
+ID                  NAME                MODE                REPLICAS            IMAGE               PORTS
+u9hmxwc4osyp        db                  replicated          1/1                 mysql:5.7
+lud71tsd8sar        ghost               replicated          1/1                 ghost:alpine        *:8082->2368/tcp
+[cloud_user@fas2c services]$
+[cloud_user@fas2c services]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+8b4f11b7341f        ghost:alpine        "docker-entrypoint.s…"   12 seconds ago      Up 6 seconds        2368/tcp            ghost.1.jrtxguphfkmqdvhno3z6lqsh0
+
+[cloud_user@fas2c services]$ docker container exec -it ghost.1.jrtxguphfkmqdvhno3z6lqsh0 sh
+/var/lib/ghost # env
+NODE_VERSION=12.16.2
+HOSTNAME=8b4f11b7341f
+YARN_VERSION=1.22.4
+SHLVL=1
+HOME=/root
+GHOST_INSTALL=/var/lib/ghost
+database__client=mysql # Переменные окружения, которые мы передаем в секции env при создании контейнера 
+database__connection__database=ghost
+GHOST_CONTENT=/var/lib/ghost/content
+TERM=xterm
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+GHOST_CLI_VERSION=1.13.1
+GHOST_VERSION=3.13.3
+database__connection__host=db
+database__connection__user=root
+PWD=/var/lib/ghost
+database__connection__password=P4sSw0rd0!
+NODE_ENV=production
+/var/lib/ghost #
+
+
+#Worker
+[cloud_user@fas4c ~]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+7a991d840ac7        mysql:5.7           "docker-entrypoint.s…"   36 seconds ago      Up 34 seconds                           db.1.v849iys3urqcfnqxheasmd75a
+
+
+[cloud_user@fas4c ~]$ sudo ls /var/lib/docker/volumes/mysql_data/_data # Обратить внимание, что volume создается на той же ноде, где запускается контейнер
+[sudo] password for cloud_user:
+auto.cnf    ca.pem           client-key.pem  ib_buffer_pool  ib_logfile0  ibtmp1  performance_schema  public_key.pem   server-key.pem
+ca-key.pem  client-cert.pem  ghost           ibdata1         ib_logfile1  mysql   private_key.pem     server-cert.pem  sys
+
+# Шаг 11. Destroy the environment:
+	terraform destroy -auto-approve -var 'ext_port=8082'
+	
+###############
+#Using Secrets#
+###############
+# We'll explore using Terraform to store sensitive data, by using Docker Secrets.
+
+# Шаг 1. Setup the environment:
+	mkdir secrets
+	cd secrets
+		
+# Шаг 2. Encode the password with Base64:
+	echo 'p4sSWoRd0!' | base64
+	
+[cloud_user@fas2c secrets]$ echo 'p4sSWoRd0!' | base64
+cDRzU1dvUmQwIQo=
+
+# Шаг 3. Create variables.tf:
+	vi variables.tf
+
+variable "mysql_root_password" {
+  default     = "cDRzU1dvUmQwIQo=" # Записываем зашифрованное значение
+}
+
+variable "mysql_db_password" {
+  default     = "cDRzU1dvUmQwIQo="
+}
+
+# Шаг 4. Create image.tf:
+	vi image.tf
+
+resource "docker_image" "mysql_image" {
+  name = "mysql:5.7"
+}
+
+# Шаг 5. Create secrets.tf:
+	vi secrets.tf
+
+resource "docker_secret" "mysql_root_password" {
+  name = "root_password"
+  data = "${var.mysql_root_password}"
+}
+
+resource "docker_secret" "mysql_db_password" {
+  name = "db_password"
+  data = "${var.mysql_db_password}"
+}
+
+# Шаг 6. Create networks.tf:
+	vi networks.tf
+
+resource "docker_network" "private_overlay_network" {
+  name     = "mysql_internal"
+  driver   = "overlay"
+  internal = true
+}
+
+# Шаг 7. Create volumes.tf:
+	vi volumes.tf
+
+resource "docker_volume" "mysql_data_volume" {
+  name = "mysql_data"
+}
+
+# Шаг 8. Create main.tf:
+	vi main.tf
+
+resource "docker_service" "mysql-service" {
+  name = "mysql_db"
+
+  task_spec {
+    container_spec {
+      image = "${docker_image.mysql_image.name}"
+
+      secrets = [
+        {
+          secret_id   = "${docker_secret.mysql_root_password.id}"
+          secret_name = "${docker_secret.mysql_root_password.name}"
+          file_name   = "/run/secrets/${docker_secret.mysql_root_password.name}"
+        },
+        {
+          secret_id   = "${docker_secret.mysql_db_password.id}"
+          secret_name = "${docker_secret.mysql_db_password.name}"
+          file_name   = "/run/secrets/${docker_secret.mysql_db_password.name}"
+        }
+      ]
+
+      env {
+        MYSQL_ROOT_PASSWORD_FILE = "/run/secrets/${docker_secret.mysql_root_password.name}"
+        MYSQL_DATABASE           = "mydb"
+        MYSQL_PASSWORD_FILE      = "/run/secrets/${docker_secret.mysql_db_password.name}"
+      }
+
+      mounts = [
+        {
+          target = "/var/lib/mysql"
+          source = "${docker_volume.mysql_data_volume.name}"
+          type   = "volume"
+        }
+      ]
+    }
+    networks = [
+      "${docker_network.private_overlay_network.name}"
+    ]
+  }
+}
+
+# Шаг 9. Initialize Terraform:
+	terraform init
+
+# Шаг 10. Validate the files:
+	terraform validate
+
+# Шаг 11. Build a plan:
+	terraform plan -out=tfplan
+
+# Шаг 12. Apply the plan:
+	terraform apply tfplan
+
+# Шаг 13. Find the MySQL container:
+	docker container ls
+	
+[cloud_user@fas2c secrets]$ docker container ls
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS               NAMES
+ac18e8fa5832        mysql:5.7           "docker-entrypoint.s…"   43 seconds ago      Up 41 seconds                           mysql_db.1.x1ue21mlt1lnzc4sn58usfmov
+
+
+Use the exec command to log into the MySQL container:
+	docker container exec -it [CONTAINER_ID] /bin/bash
+		Access MySQL:
+		mysql -u root -p
+		
+[cloud_user@fas2c secrets]$ docker container exec -it ac18e8fa5832 /bin/bash
+root@ac18e8fa5832:/# mysql -u root -p
+	Enter password: # Вводим пароль - p4sSWoRd0!
+	Welcome to the MySQL monitor.  Commands end with ; or \g.
+	Your MySQL connection id is 2
+	mysql>
+
+root@ac18e8fa5832:/# ls /run/secrets/ # ВАЖНО: секреты лежат в контейнере, а не на основном хосте
+db_password  root_password
+
+Destroy the environment:
+	terraform destroy -auto-approve
+	
+###############
+#Lab 1. Using Terraform to Create a Docker Volume and Network#
+###############
+# План:
+
+Create the variables file
+	Create variables.tf and add four variables with these default values:
+	container_name: mysql.
+	mysql_root_password: P4sSw0rd0!.
+	mysql_network_name: mysql_internal_network.
+	mysql_volume_name: mysql_data.
+Create the images file
+	Create images.tf.
+	Add the docker_image resource and call it mysql_image.
+	Set the name to mysql:5.7.
+Create the networks file
+	Create networks.tf.
+	Add the docker_network resource and call it private_bridge_network.
+	Set the name to use the mysql_network_name variable.
+	Set the driver to bridge.
+	Set internal to true.
+Create the volumes file
+	In volumes.tf add the docker_volume resource and call it mysql_data_volume.
+	Set the name to use the mysql_volume_name variable.
+Create the main file
+	In main.tf add the docker_container resource and call it mysql_container.
+	Set the name to use the container_name variable.
+	Set the image to use the name of the image coming from docker_image.
+	Create an environment variable for MYSQL_ROOT_PASSWORD and set it to the mysql_root_password variable.
+	Configure the container volume to use the volume created by docker_volume, and make sure the container_path is set to /var/lib/mysql.
+	The container needs to use the network created by docker_network.
+Deploy the infrastructure
+	Initialize Terraform.
+	Validate the files.
+	Generate a Terraform plan.
+	Deploy the infrastructure using the plan file.
+
+# Решение:
+
+# Шаг 1. vi variables.tf
+
+variable "container_name" {
+  description = "The MySQL container name."
+  default     = "mysql"
+}
+
+variable "mysql_root_password" {
+  description = "The MySQL root password."
+  default     = "P4sSw0rd0!"
+}
+
+variable "mysql_network_name" {
+  description = "The MySQL's network'."
+  default     = "mysql_internal_network"
+}
+
+variable "mysql_volume_name" {
+  description = "The MySQL's Volume'."
+  default     = "mysql_data"
+}
+
+# Шаг 2. vi image.tf
+
+resource "docker_image" "mysql_image" {
+name = "mysql:5.7"
+}
+
+# Шаг 3. vi network.tf
+
+resource "docker_network" "private_bridge_network" {
+  name     = "${var.mysql_network_name}"
+  driver   = "bridge"
+  internal = true
+}
+
+# Шаг 4. vi volume.tf
+
+resource "docker_volume" "mysql_data_volume" {
+  name = "${var.mysql_volume_name}"
+}
+
+# Шаг 5. vi main.tf
+
+resource "docker_container" "mysl_container" {
+  name  = "${var.container_name}"
+  image = "${docker_image.mysql_image.name}"
+  env   = [
+    "MYSQL_ROOT_PASSWORD=${var.mysql_root_password}"
+  ]
+  volumes {
+    volume_name    = "${docker_volume.mysql_data_volume.name}"
+    container_path = "/var/lib/mysql"
+  }
+  networks_advanced {
+    name    = "${docker_network.private_bridge_network.name}"
+  }
+}
+
+# Шаг 6. Initialize Terraform:
+	terraform init
+
+# Шаг 7. Validate the files:
+	terraform validate
+
+# Шаг 8. Build a plan:
+	terraform plan -out=tfplan
+
+# Шаг 9. Apply the plan:
+	terraform apply tfplan
+	
+# Шаг 10. Проверка тома
+	
+	docker volume inspect mysql_data
+
+[cloud_user@ip-10-0-1-20 ~]$ docker volume inspect mysql_data
+[
+    {
+        "CreatedAt": "2020-04-21T01:34:08-04:00",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/mysql_data/_data",
+        "Name": "mysql_data",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+
+	sudo ls /var/lib/docker/volumes/mysql_data/_data
+
+[cloud_user@ip-10-0-1-20 ~]$ sudo ls /var/lib/docker/volumes/mysql_data/_data
+[sudo] password for cloud_user:
+auto.cnf    ca.pem           client-key.pem  ibdata1      ib_logfile1  mysql               private_key.pem  server-cert.pem  sys
+ca-key.pem  client-cert.pem  ib_buffer_pool  ib_logfile0  ibtmp1       performance_schema  public_key.pem   server-key.pem
+
+
+###############
+#Lab 2. Using Terraform to Create a Docker Volume and Network#
+###############

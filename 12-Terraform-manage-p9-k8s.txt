@@ -1,0 +1,504 @@
+						##### Terraform and Kubernetes #####
+###############
+#Terraform Formatting and Remote State#
+###############
+# We will setup a Kuberentes master and install Terraform.
+
+# Шаг 0. В песочнице создаем сервер типа CloudNative Kubernetes
+	# Этот сервер будет использоваться как K8s Master и тут уже установлена часть компонентов для работы с K8s
+	
+# Шаг 1. Add the following to kube-config.yml:
+
+apiVersion: kubeadm.k8s.io/v1beta1
+kind: ClusterConfiguration
+networking:
+  podSubnet: 10.244.0.0/16
+apiServer:
+  extraArgs:
+    service-node-port-range: 8000-31274
+
+# Шаг 2. Initialize Kubernetes:
+	sudo kubeadm init --config kube-config.yml
+
+# Шаг 3. Copy admin.conf to your home directory:
+	mkdir -p $HOME/.kube
+	sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+	sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+# Шаг 4. Install Flannel:
+	sudo kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+# Шаг 5. Untaint the Kubernetes Master:
+	kubectl taint nodes --all node-role.kubernetes.io/master- # Теперь на MAster можно устанавливать поды
+
+# Шаг 6. Install Terraform. Terraform will be installed on the Swarm manager.
+	sudo curl -O https://releases.hashicorp.com/terraform/0.11.13/terraform_0.11.13_linux_amd64.zip
+	sudo unzip terraform_0.11.13_linux_amd64.zip -d /usr/local/bin/
+
+# Шаг 7. Test the Terraform installation:
+	terraform version
+	
+###############
+#Creating a Pod#
+###############
+
+# We will start working with Kubernetes resources by creating a Pod.
+
+# Шаг 1. Setup your environment:
+	mkdir -p ~/terraform/pod
+	cd ~/terraform/pod
+
+# Шаг 2. vi main.tf:
+
+resource "kubernetes_pod" "ghost_alpine" {
+  metadata {
+    name = "ghost-alpine"
+  }
+
+  spec {
+    host_network = "true"
+    container {
+      image = "ghost:alpine"
+      name  = "ghost-alpine"
+    }
+  }
+}
+
+# Шаг 3. Initialize Terraform:
+	terraform init
+
+# Шаг 4. Validate main.tf:
+	terraform validate
+
+# Шаг 5. Plan the deployment:
+	terraform plan
+
+# Шаг 6. Deploy the pod:
+terraform apply -auto-approve
+
+# Шаг 7. List the Pods:
+	kubectl get pods
+
+# Шаг 8. Reset the environment:
+	terraform destroy -auto-approve
+	
+###############
+#Creating a Pod and Service#
+###############
+
+# We will create a pod and service using Terraform.
+
+# Шаг 1. Setup your environment:
+	mkdir -p ~/terraform/service
+	cd ~/terraform/service
+
+# Шаг 2. Create main.tf:
+	vi main.tf
+
+resource "kubernetes_service" "ghost_service" {
+  metadata {
+    name = "ghost-service"
+  }
+  spec {
+    selector {
+      app = "${kubernetes_pod.ghost_alpine.metadata.0.labels.app}"
+    }
+    port {
+      port = "2368"
+      target_port = "2368"
+      node_port = "8081"
+    }
+    type = "NodePort"
+  }
+}
+
+resource "kubernetes_pod" "ghost_alpine" {
+  metadata {
+    name = "ghost-alpine"
+    labels {
+      app = "ghost-blog"
+    }
+  }
+
+  spec {
+    container {
+      image = "ghost:alpine"
+      name  = "ghost-alpine"
+      port  {
+        container_port = "2368"
+      }
+    }
+  }
+}
+
+# Шаг 3. Initialize Terraform:
+	terraform init
+
+# Шаг 4. Validate the files:
+	terraform validate
+
+# Шаг 5. Plan the deployment:
+	terraform plan
+
+# Шаг 6. Deploy the pod:
+	terraform apply -auto-approve
+
+# Шаг 7. List the Pods:
+	kubectl get pods
+
+# Шаг 8. List the Services:
+	kubectl get services
+
+# Шаг 9. Reset the environment:
+	terraform destroy -auto-approve
+	
+###############
+#Creating a Deployment#
+###############
+
+# We will use Terraform to create a Kubernetes deployment and service.
+
+# Шаг 1. Setup your environment:
+	mkdir -p ~/terraform/deployment
+	cd ~/terraform/deployment
+
+# Шаг 2. Create main.tf:
+	vi main.tf
+
+resource "kubernetes_service" "ghost_service" {
+  metadata {
+    name = "ghost-service"
+  }
+  spec {
+    selector {
+      app = "${kubernetes_deployment.ghost_deployment.spec.0.template.0.metadata.0.labels.app}"
+    }
+    port {
+      port        = "2368"
+      target_port = "2368"
+      node_port   = "8080"
+    }
+
+    type = "NodePort"
+  }
+}
+
+resource "kubernetes_deployment" "ghost_deployment" {
+  metadata {
+    name = "ghost-blog"
+  }
+
+  spec {
+    replicas = "1"
+
+    selector {
+      match_labels {
+        app = "ghost-blog"
+      }
+    }
+
+    template {
+      metadata {
+        labels {
+          app = "ghost-blog"
+        }
+      }
+
+      spec {
+        container {
+          name  = "ghost"
+          image = "ghost:alpine"
+          port {
+            container_port = "2368"
+          }
+        }
+      }
+    }
+  }
+}
+
+# Шаг 3. Initialize Terraform:
+	terraform init
+
+# Шаг 4. Validate the files:
+	terraform validate
+
+# Шаг 5. Plan the deployment:
+	terraform plan
+
+# Шаг 6. Deploy the pod:
+	terraform apply -auto-approve
+
+# Шаг 7. List the Deployments:
+	kubectl get deployments
+	kubectl get pods
+	kubectl delete pod [POD_ID] # После удаления автоматически поднимется новый под
+
+# Шаг 8. Reset the environment:
+	terraform destroy -auto-approve
+	
+###############
+#Lab 1. Creating a Pod and Service with Terraform#
+###############
+
+# Шаг 1. Create variable.tf:
+	vi variable.tf
+
+variable "app_label" {
+  default     = "ghost-blog"
+}
+
+variable "int_port" {
+  default     = "2368"
+}
+
+variable "ext_port" {
+  default     = "8081"
+}
+
+variable "image_name" {
+  default     = "ghost:alpine"
+}
+
+variable "pod_name" {
+  default     = "ghost-blog"
+}
+
+# Шаг 2. Create main.tf:
+	vi main.tf
+
+resource "kubernetes_service" "ghost_service" {
+  metadata {
+    name = "ghost-service"
+  }
+  spec {
+    selector {
+      app = "${var.app_label}"
+    }
+    port {
+      port = "${var.int_port}"
+      target_port = "${var.int_port}"
+      node_port = "${var.ext_port}"
+    }
+    type = "NodePort"
+  }
+}
+
+resource "kubernetes_pod" "ghost_blog" {
+  metadata {
+    name = "ghost-pod"
+    labels {
+      app = "${var.app_label}"
+    }
+  }
+
+  spec {
+    container {
+      image = "${var.image_name}"
+      name  = "${var.pod_name}"
+      port  {
+        container_port = "${var.int_port}"
+      }
+    }
+  }
+}
+
+# Шаг 3. Initialize Terraform:
+	terraform init
+
+# Шаг 4. Validate the files:
+	terraform validate
+
+# Шаг 5. Deploy the pod:
+	terraform apply -auto-approve
+	
+###############
+#Lab 2. Using Terraform to Create a Kubernetes Deployment#
+###############
+
+# Шаг 1. Create variable.tf:
+	vi variable.tf
+
+variable "app_label" {
+  default = "wordpress"
+}
+
+variable "mysql_tier" {
+  default = "mysql"
+}
+
+variable "wordpress_tier" {
+  default = "frontend"
+}
+
+variable "wordpress_version" {
+  default = "4.7.3"
+}
+
+variable "mysql_password" {
+  default = "P4sSw0rd0!"
+}
+
+# Шаг 2. Create main.tf:
+	vi main.tf
+
+resource "kubernetes_service" "mysql_service" {
+  metadata {
+    name = "wordpress-mysql"
+    labels = {
+      app = "${var.app_label}"
+    }
+  }
+  spec {
+    selector {
+      app  = "${var.app_label}"
+      tier = "${var.mysql_tier}"
+    }
+    port {
+      port = "3306"
+    }
+
+    type = "NodePort"
+  }
+}
+
+resource "kubernetes_deployment" "mysql_deployment" {
+  metadata {
+    name   = "wordpress-mysql"
+    labels = {
+      app = "${var.app_label}"
+    }
+  }
+
+  spec {
+    replicas = "1"
+
+    selector {
+      match_labels {
+        app  = "${var.app_label}"
+        tier = "${var.mysql_tier}"
+      }
+    }
+
+    template {
+      metadata {
+        labels {
+          app  = "${var.app_label}"
+          tier = "${var.mysql_tier}"
+        }
+      }
+
+      spec {
+        container {
+          name  = "mysql"
+          image = "mysql:5.7"
+
+          env {
+            name  = "MYSQL_ROOT_PASSWORD"
+            value = "${var.mysql_password}"
+          }
+
+          port {
+            container_port = "3306"
+            name           = "mysql"
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_service" "wordpress_service" {
+  metadata {
+    name   = "wordpress"
+    labels = {
+      app = "${var.app_label}"
+    }
+  }
+  spec {
+    selector {
+      app  = "${var.app_label}"
+      tier = "${var.wordpress_tier}"
+    }
+
+    port {
+      port        = "80"
+      target_port = "80"
+      node_port   = "8080"
+    }
+
+    type = "NodePort"
+  }
+}
+
+resource "kubernetes_deployment" "wordpress_deployment" {
+  metadata {
+    name = "wordpress"
+  }
+
+  spec {
+    replicas = "1"
+
+    selector {
+      match_labels {
+        app  = "${var.app_label}"
+        tier = "${var.wordpress_tier}"
+      }
+    }
+
+    template {
+      metadata {
+        labels {
+          app  = "${var.app_label}"
+          tier = "${var.wordpress_tier}"
+        }
+      }
+
+      spec {
+        container {
+          name  = "wordpress"
+          image = "wordpress:${var.wordpress_version}-apache"
+
+          env {
+            name = "WORDPRESS_DB_HOST"
+            value = "wordpress-mysql"
+          }
+
+          env {
+            name  = "WORDPRESS_DB_PASSWORD"
+            value = "${var.mysql_password}"
+          }
+
+          port {
+            container_port = "80"
+            name           = "wordpress"
+          }
+        }
+      }
+    }
+  }
+}
+
+# Шаг 3. Initialize Terraform:
+	terraform init
+
+# Шаг 4. Validate the files:
+	terraform validate
+
+# Шаг 5. Deploy the pod:
+	terraform apply -auto-approve
+	
+# Проверка:
+
+[cloud_user@ip-10-0-1-182 ~]$ kubectl get pods
+NAME                               READY     STATUS    RESTARTS   AGE
+wordpress-55fd9f5974-47vll         1/1       Running   0          1m
+wordpress-mysql-5d8694db89-n6fhz   1/1       Running   0          1m
+
+[cloud_user@ip-10-0-1-182 ~]$ kubectl get services
+NAME              TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+kubernetes        ClusterIP   10.96.0.1        <none>        443/TCP          26m
+wordpress         NodePort    10.99.35.194     <none>        80:8080/TCP      1m
+wordpress-mysql   NodePort    10.110.138.103   <none>        3306:24085/TCP   1m
+
+# Далее можно зайти по адресу http://[public IP Master]:8080/

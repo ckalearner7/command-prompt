@@ -1,0 +1,983 @@
+						##### Terraform and AWS #####
+###############
+#Storage Part 1: The S3 Bucket and Random ID#
+###############
+# We will start working with AWS by creating a S3 Terraform module.
+
+# Шаг 1. Environment setup:
+	mkdir -p ~/terraform/AWS/storage
+	cd ~/terraform/AWS/storage
+
+# Шаг 2. Create main.tf:
+	vi main.tf
+
+#---------storage/main.tf---------
+
+# Create a random id
+resource "random_id" "tf_bucket_id" {
+  byte_length = 2
+}
+
+# Create the bucket
+resource "aws_s3_bucket" "tf_code" {
+    bucket        = "${var.project_name}-${random_id.tf_bucket_id.dec}"
+    acl           = "private"
+
+    force_destroy =  true
+
+    tags {
+      Name = "tf_bucket"
+    }
+}
+
+# Шаг 3. Create variables.tf:
+	vi variables.tf
+
+#----storage/variables.tf----
+variable "project_name" {}
+
+# Шаг 4. Create outputs.tf:
+	vi outputs.tf
+
+#----storage/outputs.tf----
+output "bucketname" {
+  value = "${aws_s3_bucket.tf_code.id}"
+}
+
+# Шаг 5. Initialize Terraform:
+	terraform init
+
+# Шаг 6. Validate your files:	
+	terraform validate
+
+# Шаг 7. Plan the deployment:
+	export AWS_ACCESS_KEY_ID="[ACCESS_KEY]"
+	export AWS_SECRET_ACCESS_KEY="[SECRET_KEY]"
+	export AWS_DEFAULT_REGION="us-east-1"
+	terraform plan -out=tfplan -var project_name=la-terraform
+
+# Шаг 8. Deploy the S3 bucket:
+	terraform apply tfplan
+
+# Шаг 9. Destroy S3 bucket:
+	terraform destroy -auto-approve -var project_name=la-terraform
+
+###############
+#Storage Part 2: The Root Module#
+###############
+# We will start working on our root module. We'll start off by adding the storage module created in the previous lesson.
+
+# Шаг 1. Environment setup:
+	cd ~/terraform/AWS
+	touch {main.tf,variables.tf,outputs.tf,terraform.tfvars}
+
+# Шаг 2. Edit main.tf:
+	vi main.tf
+
+#----root/main.tf-----
+provider "aws" {
+  region = "${var.aws_region}"
+}
+
+# Deploy Storage Resources
+module "storage" {
+  source       = "./storage"
+  project_name = "${var.project_name}"
+}
+
+# Шаг 3. Edit variables.tf:
+	vi variables.tf
+
+#----root/variables.tf-----
+variable "aws_region" {}
+
+#------ storage variables
+variable "project_name" {}
+
+# Шаг 4. Edit terraform.tfvars:
+	vi terraform.tfvars
+
+aws_region   = "us-east-1"
+project_name = "la-terraform"
+
+# Шаг 5. Edit outputs.tf:
+	vi outputs.tf
+
+#----root/outputs.tf-----
+
+#----storage outputs------
+output "Bucket Name" {
+  value = "${module.storage.bucketname}" # bucketname в output модуля
+}
+
+# Шаг 6. Initialize terraform:
+	export AWS_ACCESS_KEY_ID="[ACCESS_KEY]"
+	export AWS_SECRET_ACCESS_KEY="[SECRET_KEY]]"
+	terraform init
+
+# Шаг 7. Validate code:
+	terraform validate
+
+# Шаг 8. Deploy the S3 bucket:
+	terraform apply -auto-approve
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+Outputs:
+Bucket Name = la-terraform-50544
+
+# Шаг 9. Destroy S3 bucket:
+terraform destroy -auto-approve
+
+vi variables.tf
+#----root/variables.tf-----
+variable "aws_region" {}
+
+#------ storage variables
+variable "project_name" {
+  default = "la-terraform-default" # Задаем значение по умолчанию
+}
+
+# Шаг 10. Приоритете значений переменных (в variables.tf или в terraform.tfvars):
+vi terraform.tfvars
+aws_region   = "us-east-1"
+project_name = "la-terraform-tfvars" # Задаем значение для той же переменной, что и в variables.tf
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+Outputs:
+Bucket Name = la-terraform-tfvars-51539 # Значение в terraform.tfvars приоритетнее, чем значение по умолчанию в variables.tf
+
+###############
+#Networking Part 1 - 3 : VPC, IGW, Route Tables, SecurityGroup and etc.#
+###############
+# We will start our networking resource deployment and we will deploy our Internet Gateway and route tables.
+
+# Шаг 1. Environment setup:
+	mkdir -p  ~/terraform/AWS/networking
+	cd ~/terraform/AWS/networking
+
+# Шаг 2. Touch the files:
+	touch {main.tf,variables.tf,outputs.tf,terraform.tfvars}
+
+# Шаг 3. Edit main.tf:
+	vi main.tf
+
+#----networking/main.tf----
+
+data "aws_availability_zones" "available" {}
+
+resource "aws_vpc" "tf_vpc" {
+  cidr_block           = "${var.vpc_cidr}"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags {
+    Name = "tf_vpc"
+  }
+}
+
+resource "aws_internet_gateway" "tf_internet_gateway" {
+  vpc_id = "${aws_vpc.tf_vpc.id}"
+
+  tags {
+    Name = "tf_igw"
+  }
+}
+
+resource "aws_route_table" "tf_public_rt" {
+  vpc_id = "${aws_vpc.tf_vpc.id}"
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = "${aws_internet_gateway.tf_internet_gateway.id}"
+  }
+
+  tags {
+    Name = "tf_public"
+  }
+}
+
+resource "aws_default_route_table" "tf_private_rt" {
+  default_route_table_id  = "${aws_vpc.tf_vpc.default_route_table_id}"
+
+  tags {
+    Name = "tf_private"
+  }
+}
+
+resource "aws_subnet" "tf_public_subnet" {
+  count                   = 2
+  vpc_id                  = "${aws_vpc.tf_vpc.id}"
+  cidr_block              = "${var.public_cidrs[count.index]}"
+  map_public_ip_on_launch = true
+  availability_zone       = "${data.aws_availability_zones.available.names[count.index]}"
+
+  tags {
+    Name = "tf_public_${count.index + 1}"
+  }
+}
+
+resource "aws_route_table_association" "tf_public_assoc" {
+  count          = "${aws_subnet.tf_public_subnet.count}"
+  subnet_id      = "${aws_subnet.tf_public_subnet.*.id[count.index]}"
+  route_table_id = "${aws_route_table.tf_public_rt.id}"
+}
+
+resource "aws_security_group" "tf_public_sg" {
+  name        = "tf_public_sg"
+  description = "Used for access to the public instances"
+  vpc_id      = "${aws_vpc.tf_vpc.id}"
+
+  #SSH
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["${var.accessip}"]
+  }
+
+  #HTTP
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["${var.accessip}"]
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Шаг 4. Edit variables.tf:
+	vi variables.tf
+	
+#----networking/variables.tf----
+variable "vpc_cidr" {}
+
+variable "public_cidrs" {
+  type = "list"
+}
+
+variable "accessip" {}
+
+# Шаг 5. Edit outputs.tf:
+	vi outputs.tf
+
+#-----networking/outputs.tf----
+
+output "public_subnets" {
+  value = "${aws_subnet.tf_public_subnet.*.id}"
+}
+
+output "public_sg" {
+  value = "${aws_security_group.tf_public_sg.id}"
+}
+
+output "subnet_ips" {
+  value = "${aws_subnet.tf_public_subnet.*.cidr_block}"
+}
+
+# Шаг 6. terraform.tfvars:
+	vi terraform.tfvars
+
+vpc_cidr     = "10.123.0.0/16"
+public_cidrs = [
+  "10.123.1.0/24",
+  "10.123.2.0/24"
+]
+accessip    = "0.0.0.0/0"
+
+# Шаг 7. Initialize Terraform:
+	export AWS_ACCESS_KEY_ID="[ACCESS_KEY]"
+	export AWS_SECRET_ACCESS_KEY="[SECRET_KEY]]"
+	export AWS_DEFAULT_REGION="us-east-1"
+	terraform init
+
+# Шаг 8. Validate code:
+	terraform validate
+
+# Шаг 9. Deploy Network:
+	terraform apply -auto-approve
+	
+Apply complete! Resources: 9 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+public_sg = sg-059279c939d7f8e27
+public_subnets = [
+    subnet-038eac46a84dc2d9d,
+    subnet-03be16284ac055d79
+]
+subnet_ips = [
+    10.123.1.0/24,
+    10.123.2.0/24
+]
+
+# Шаг 10. Destroy Network:
+	terraform destroy -auto-approve
+
+# Шаг 11. Delete terraform.tfvars:
+	rm terraform.tfvars
+	
+###############
+#Networking Part 4: The Root Module#
+###############
+# We will add the networking module to the root module.
+
+# Шаг 1. Environment setup:
+	cd ~/terraform/AWS
+
+# Шаг 2. Edit main.tf:
+	vi main.tf
+
+provider "aws" {
+  region = "${var.aws_region}"
+}
+
+# Deploy Storage Resources
+module "storage" {
+  source       = "./storage"
+  project_name = "${var.project_name}"
+}
+
+# Deploy Networking Resources
+module "networking" {
+  source       = "./networking"
+  vpc_cidr     = "${var.vpc_cidr}"
+  public_cidrs = "${var.public_cidrs}"
+  accessip     = "${var.accessip}"
+}
+
+# Шаг 3. Edit variables.tf:
+	vi variables.tf
+
+#----root/variables.tf-----
+variable "aws_region" {}
+
+#------ storage variables
+variable "project_name" {}
+
+#-------networking variables
+variable "vpc_cidr" {}
+variable "public_cidrs" {
+  type = "list"
+}
+variable "accessip" {}
+
+# Шаг 4. Edit terraform.tfvars:
+	vi terraform.tfvars
+	
+aws_region   = "us-east-1"
+project_name = "la-terraform"
+vpc_cidr     = "10.123.0.0/16"
+public_cidrs = [
+  "10.123.1.0/24",
+  "10.123.2.0/24"
+]
+accessip    = "0.0.0.0/0"
+
+# Шаг 5. Reinitialize Terraform:
+	export AWS_ACCESS_KEY_ID="[ACCESS_KEY]"
+	export AWS_SECRET_ACCESS_KEY="[SECRET_KEY]]"
+	terraform init
+
+# Шаг 6. Validate code:
+	terraform validate
+
+# Шаг 7. Apply Changes:
+	terraform apply -auto-approve
+
+# Шаг 8. Destroy environment:
+	terraform destroy -auto-approve
+	
+###############
+#Compute Part 1 - AMI Data, Key Pair, and the File Function#
+###############
+# We will start working on building out the resources for out AWS compute.
+
+# Шаг 1. Environment setup:
+	mkdir -p  ~/terraform/AWS/compute
+	cd ~/terraform/AWS/compute
+
+# Шаг 2. Touch the files:
+	touch {main.tf,variables.tf,outputs.tf}
+
+# Шаг 3. Create a SSH key.
+	ssh-keygen
+	
+[cloud_user@fas2c compute]$ ssh-keygen
+Generating public/private rsa key pair.
+Enter file in which to save the key (/home/cloud_user/.ssh/id_rsa):
+Enter passphrase (empty for no passphrase):
+Enter same passphrase again:
+Your identification has been saved in /home/cloud_user/.ssh/id_rsa. # Сгенерирован private-key
+Your public key has been saved in /home/cloud_user/.ssh/id_rsa.pub. # Сгенерирован public-key
+The key fingerprint is:
+SHA256:LoQfnKXDZU8D2meKbG7davDq9BbEH2cs0pcTXbeusm0 cloud_user@fas2c.mylabserver.com
+The key's randomart image is:
++---[RSA 2048]----+
+|        .+ .. .  |
+|       o=%.  . . |
+|      ..=+=.  .  |
+|     = B+*+.+.   |
+|    . %.So.=  .  |
+|     =.=...  .   |
+|      *oo....    |
+|     o o+...E    |
+|     .o+o...     |
++----[SHA256]-----+
+
+
+# Шаг 4. Edit main.tf:
+	vi main.tf
+
+#----compute/main.tf#----
+data "aws_ami" "server_ami" {
+  most_recent = true
+
+  owners = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn-ami-hvm*-x86_64-gp2"]
+  }
+}
+
+resource "aws_key_pair" "tf_auth" {
+  key_name   = "${var.key_name}"
+  public_key = "${file(var.public_key_path)}"
+}
+
+# Шаг 5. Edit variables.tf:
+	vi variables.tf
+
+#----compute/variables.tf----
+variable "key_name" {}
+
+variable "public_key_path" {}
+
+# Шаг 6. Initialize Terraform:
+	export AWS_ACCESS_KEY_ID="[ACCESS_KEY]"
+	export AWS_SECRET_ACCESS_KEY="[SECRET_KEY]]"
+	terraform init
+
+# Шаг 7. Validate changes:
+	terraform validate
+
+# Шаг 8. Plan the changes:
+	terraform plan -out=tfplan -var 'key_name=tfkey' -var 'public_key_path=/home/cloud_user/.ssh/id_rsa.pub'
+
+# Шаг 8. Apply the changes:
+	terraform apply -auto-approve
+	
+#Ресурс будет создан тут https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#KeyPairs:
+
+# Шаг 9. Provide the values for key_name and public_key_path: key_name: tfkey public_key_path: /home/cloud_user/.ssh/id_rsa.pub
+
+# Шаг 10. Destroy environment:
+	terraform destroy -auto-approve
+	
+# Шаг 11. Provide the values for key_name and public_key_path: key_name: tfkey public_key_path: /home/cloud_user/.ssh/id_rsa.pub
+
+[cloud_user@fas2c compute]$ terraform destroy -auto-approve
+var.key_name
+  Enter a value: tfkey
+
+var.public_key_path
+  Enter a value: /home/cloud_user/.ssh/id_rsa.pub
+
+###############
+#Compute Part 2: The EC2 Instance#
+###############
+# We will finish off the Compute module by adding the aws_instance resource.
+
+# Шаг 1. Edit main.tf:
+	vi main.tf
+
+#-----compute/main.tf#-----
+
+data "aws_ami" "server_ami" {
+  most_recent = true
+
+  owners = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn-ami-hvm*-x86_64-gp2"]
+  }
+}
+
+resource "aws_key_pair" "tf_auth" {
+  key_name   = "${var.key_name}"
+  public_key = "${file(var.public_key_path)}"
+}
+
+data "template_file" "user-init" {
+  count    = 2
+  template = "${file("${path.module}/userdata.tpl")}"
+
+  vars {
+    firewall_subnets = "${element(var.subnet_ips, count.index)}" # Подставляем в шаблон userdata.tpl значение переменной firewall_subnets из СПИСКА var.subnet_ips
+  }
+}
+
+resource "aws_instance" "tf_server" {
+  count         = "${var.instance_count}"
+  instance_type = "${var.instance_type}"
+  ami           = "${data.aws_ami.server_ami.id}"
+
+  tags {
+    Name = "tf_server-${count.index +1}"
+  }
+
+  key_name               = "${aws_key_pair.tf_auth.id}" # Задаем ключи для подключения к EC2
+  vpc_security_group_ids = ["${var.security_group}"]
+  subnet_id              = "${element(var.subnets, count.index)}"
+  user_data              = "${data.template_file.user-init.*.rendered[count.index]}" # Определяем, что нужно сделать на хосте в момент его запуска
+}
+
+# Шаг 2. Create userdata.tpl:
+	vi userdata.tpl
+
+#!/bin/bash
+yum install httpd -y
+echo "Subnet for Firewall: ${firewall_subnets}" >> /var/www/html/index.html
+service httpd start
+chkconfig httpd on
+
+# Шаг 3. Edit variables.tf:
+	vi variables.tf
+
+#-----compute/variables.tf
+
+variable "key_name" {}
+
+variable "public_key_path" {}
+
+variable "subnet_ips" {
+  type = "list"
+}
+
+variable "instance_count" {}
+
+variable "instance_type" {}
+
+variable "security_group" {}
+
+variable "subnets" {
+  type = "list"
+}
+
+# Шаг 4. Edit outputs.tf:
+	vi outputs.tf
+
+#-----compute/outputs.tf-----
+
+output "server_id" {
+  value = "${join(", ", aws_instance.tf_server.*.id)}" # Объединение, потому что EC2 может быть создано несколько
+}
+
+output "server_ip" {
+  value = "${join(", ", aws_instance.tf_server.*.public_ip)}"
+}
+
+###############
+#Lecture: Compute Part 3: The Root Module#
+###############
+#We will finish working with the EC2 resources by adding the compute module to the root module.
+
+# Шаг 0. Check the Environment:
+	[cloud_user@fas2c ~]$ cd terraform/AWS/
+	
+# Шаг 1. Edit main.tf:
+	vi main.tf
+
+provider "aws" {
+  region = "${var.aws_region}"
+}
+
+# Deploy Storage Resources
+module "storage" {
+  source       = "./storage"
+  project_name = "${var.project_name}"
+}
+
+# Deploy Networking Resources
+module "networking" {
+  source       = "./networking"
+  vpc_cidr     = "${var.vpc_cidr}"
+  public_cidrs = "${var.public_cidrs}"
+  accessip    = "${var.accessip}"
+}
+
+# Deploy Compute Resources
+module "compute" {
+  source          = "./compute"
+  instance_count  = "${var.instance_count}"
+  key_name        = "${var.key_name}"
+  public_key_path = "${var.public_key_path}"
+  instance_type   = "${var.server_instance_type}"
+  subnets         = "${module.networking.public_subnets}"
+  security_group  = "${module.networking.public_sg}"
+  subnet_ips      = "${module.networking.subnet_ips}"
+}
+
+# Шаг 2. Edit variables.tf:
+	vi variables.tf
+
+#----root/variables.tf-----
+variable "aws_region" {}
+
+#------ storage variables
+variable "project_name" {}
+
+#-------networking variables
+variable "vpc_cidr" {}
+variable "public_cidrs" {
+  type = "list"
+}
+variable "accessip" {}
+
+#-------compute variables
+variable "key_name" {}
+variable "public_key_path" {}
+variable "server_instance_type" {}
+variable "instance_count" {
+  default = 1
+}
+
+# Шаг 3. Edit outputs.tf:
+	vi outputs.tf
+
+#----root/outputs.tf-----
+
+#----storage outputs------
+
+output "Bucket Name" {
+  value = "${module.storage.bucketname}"
+}
+
+#---Networking Outputs -----
+
+output "Public Subnets" {
+  value = "${join(", ", module.networking.public_subnets)}"
+}
+
+output "Subnet IPs" {
+  value = "${join(", ", module.networking.subnet_ips)}"
+}
+
+output "Public Security Group" {
+  value = "${module.networking.public_sg}"
+}
+
+#---Compute Outputs ------
+
+output "Public Instance IDs" {
+  value = "${module.compute.server_id}"
+}
+
+output "Public Instance IPs" {
+  value = "${module.compute.server_ip}"
+}
+
+# Шаг 4. Edit terraform.tfvars:
+	vi terraform.tfvars
+
+aws_region   = "us-east-1"
+project_name = "la-terraform"
+vpc_cidr     = "10.123.0.0/16"
+public_cidrs = [
+  "10.123.1.0/24",
+  "10.123.2.0/24"
+]
+accessip    = "0.0.0.0/0"
+key_name = "tf_key"
+public_key_path = "/home/cloud_user/.ssh/id_rsa.pub"
+server_instance_type = "t2.micro"
+instance_count = 2
+
+# Шаг 5. Initialize Terraform:
+	export AWS_ACCESS_KEY_ID="[ACCESS_KEY]"
+	export AWS_SECRET_ACCESS_KEY="[SECRET_KEY]"
+	terraform init
+
+# Шаг 6. Validate changes:
+	terraform validate
+	
+# Шаг 7. Plan the changes:
+	terraform plan
+
+# Шаг 8. Apply the changes:
+	terraform apply
+	
+Apply complete! Resources: 14 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+Bucket Name = la-terraform-47888
+Public Instance IDs = i-072ab0faabeaf0b2e, i-0eaf3fa1f16dc0d6c
+Public Instance IPs = 3.235.138.130, 54.86.85.144
+Public Security Group = sg-01e9e2ad3b0cf4bed
+Public Subnets = subnet-069d27871f2ed0e91, subnet-0ac3017572ea8843b
+Subnet IPs = 10.123.1.0/24, 10.123.2.0/24
+
+# Вывод в браузере:
+Subnet for Firewall: 10.123.1.0/24 # На первом EC2
+Subnet for Firewall: 10.123.2.0/24 # На втором EC2
+
+# Как подключиться по SSH
+	[cloud_user@fas2c AWS]$ openssl rsa -in ~/.ssh/id_rsa -outform pem > id_rsa.pem # Превратить в формат pem (только private-key)
+	[cloud_user@fas2c AWS]$ mv id_rsa.pem tf_key.pem
+	[cloud_user@fas2c AWS]$ chmod 400 tf_key.pem
+	[cloud_user@fas2c AWS]$ ssh -i "tf_key.pem" ec2-user@ec2-3-235-138-130.compute-1.amazonaws.com # Подсказка на вкладке Connect
+		[ec2-user@ip-10-123-1-79 ~]$
+
+# Шаг 9. Destroy environment:
+	terraform destroy
+	
+###############
+#Lab 1: Using Terraform to Create a RandomID and S3 Buckets#
+###############
+##### План #####
+
+# Шаг 1. Create the Main file
+	Create the main.tf Terraform file.
+	Add a provider, aws.
+	Set the region to use a variable called aws_region.
+	Add a random_id resource and name it tf_bucket_id.
+	Set the byte_length to 2.
+
+	Add a resource, aws_s3_bucket, and name it tf_code.
+	The bucket name will be set using a variable called project_name, followed by a -, and will use the dec attribute from tf_bucket_id.
+	Set the acl to private.
+	Set force_destroy to true.
+	Create a tag with a name to tf_bucket.
+
+# Шаг 2. Create the Variables File
+	Create the variables.tf Terraform file.
+	Add a variable called aws_region.
+	Set the default to us-east-1. Add a variable called project_name.
+	Set the default to la-terraform.
+
+# Шаг 3. Create the outputs file
+	Create the outputs.tf Terraform file.
+	Add a output called bucketname.
+	The value should be set to id, coming from tf_code.
+
+# Шаг 4. Deploy the infrastructure
+	Initialize Terraform.
+	Validate the files.
+	Deploy the S3 bucket.
+	
+##### Решение #####
+# Шаг 1. Create main.tf:
+	vi main.tf
+
+provider "aws" {
+  region = "${var.aws_region}"
+}
+
+resource "random_id" "tf_bucket_id" {
+  byte_length = 2
+}
+
+resource "aws_s3_bucket" "tf_code" {
+    bucket        = "${var.project_name}-${random_id.tf_bucket_id.dec}"
+    acl           = "private"
+
+    force_destroy =  true
+
+    tags {
+      Name = "tf_bucket"
+    }
+}
+
+# Шаг 2. Create variables.tf:
+	vi variables.tf
+
+variable "aws_region" {
+  default = "us-east-1"
+}
+
+variable "project_name" {
+  default = "la-terraform"
+}
+
+# Шаг 3. Create outputs.tf:
+	vi outputs.tf
+
+output "bucketname" {
+  value = "${aws_s3_bucket.tf_code.id}"
+}
+
+# Шаг 4. Initialize Terraform:
+	terraform init
+	
+# Шаг 5. Validate the files:
+	terraform validate
+	
+# Шаг 6. Deploy the S3 bucket:
+	terraform apply -auto-approve
+	
+###############
+#Lab 2: Using Join and Count to Create Multiple S3 Buckets#
+###############
+##### План #####	
+# Шаг 1. Update the Variables File
+	Edit variables.tf.
+	Add a new variable number_of_instances.
+	Set the the default to 2.
+
+# Шаг 2. Update the Main File
+	Update random_id and add a count.
+	Set the value count to use the number_of_instances variable.
+	Update aws_s3_bucket and add a count.
+	Update random_id.tf_bucket_id.dec so it iterates through the count. Update the Name tag so that tf_bucket is appended with the count index plus one.
+
+# Шаг 3. Update the Outputs File
+	Update the bucketname output value to use the join function so that it returns a comma delimited list of bucket names.
+
+# Шаг 4. Deploy the Infrastructure
+	Initialize Terraform.
+	Validate the files.
+	Deploy the S3 buckets.
+	
+##### Решение #####
+# Шаг 1. Update main.tf:
+	vi main.tf
+
+provider "aws" {
+  region = "${var.aws_region}"
+}
+
+resource "random_id" "tf_bucket_id" {
+  count       = "${var.number_of_instances}" # count можно вставить в любой ресурс
+  byte_length = 2
+}
+
+resource "aws_s3_bucket" "tf_code" {
+  count         = "${var.number_of_instances}"
+  bucket        = "${var.project_name}-${random_id.tf_bucket_id.*.dec[count.index]}"
+  acl           = "private"
+  force_destroy =  true
+
+  tags {
+    Name = "tf_bucket${count.index+1}"
+  }
+}
+
+# Шаг 2. Update variables.tf:
+	vi variables.tf
+
+variable "aws_region" {
+  default = "us-east-1"
+}
+
+variable "number_of_instances" {
+  default = "2"
+}
+
+variable "project_name" {
+  default = "la-terraform"
+}
+
+# Шаг 3. Update outputs.tf:
+	vi outputs.tf
+
+output "bucketname" {
+  value = "${join(", ", aws_s3_bucket.tf_code.*.id)}"
+}
+
+# Шаг 4. Initialize Terraform:
+	terraform init
+
+# Шаг 5. Validate the files:
+	terraform validate
+
+# Шаг 6. Deploy the S3 bucket:
+	terraform apply -auto-approve
+	
+###############
+#Lab 3: Using Join and Count to Create Multiple S3 Buckets#
+###############
+##### План #####
+# Шаг 1. Create a new SSH key for cloud_user.
+
+# Шаг 2. Edit main.tf in the Compute Module
+	Update the public_key argument in the aws_key_pair resource to use the contents of id_rsa.pub.
+	Create a data source to using the template_file resource.
+	Because we will be working with multiple resources, add count and set it using the instance_count variable.
+	Set the template argument by reading the contents of userdata.tpl. Make sure to use path.module when referencing the template file.
+	Add a variable called message that will be passed to the template.
+	The message should be set to hello from the server.
+
+# Шаг 3. Deploy the infrastructure
+	Initialize Terraform.
+	Validate the files.
+	Deploy the EC2 instances.
+	
+##### Решение #####
+
+# Шаг 1. Create the SSH Key:
+	ssh-keygen
+
+# Шаг 2. Edit main.tf:
+	vi compute/main.tf
+
+#-----compute/main.tf
+
+data "aws_ami" "server_ami" {
+  owners = ["amazon"]
+  most_recent = true
+
+  filter {
+    name   = "name"
+    values = ["amzn-ami-hvm*-x86_64-gp2"]
+  }
+}
+
+# Need to access the public key file referenced in var.public_key_path
+
+resource "aws_key_pair" "tf_auth" {
+  key_name   = "${var.key_name}"
+  public_key = "${file(var.public_key_path)}"
+}
+
+# Template file goes here
+data "template_file" "user-init" {
+  count    = 2
+  template = "${file("${path.module}/userdata.tpl")}"
+
+  vars {
+    message = "hello from the server" # Можно проверить на EC2 - click the Actions dropdown and navigate to Instance Settings > View/Change User Data
+  }
+}
+
+resource "aws_instance" "tf_server" {
+  count         = "${var.instance_count}"
+  instance_type = "${var.instance_type}"
+  ami           = "${data.aws_ami.server_ami.id}"
+
+  tags {
+    Name = "tf_server-${count.index +1}"
+  }
+
+  key_name               = "${aws_key_pair.tf_auth.id}"
+  vpc_security_group_ids = ["${var.security_group}"]
+  subnet_id              = "${element(var.subnets, count.index)}"
+  user_data              = "${data.template_file.user-init.*.rendered[count.index]}"
+}
+
+# Шаг 3. Initialize Terraform:
+	terraform init
+
+# Шаг 4. Validate the files:
+	terraform validate
+
+# Шаг 5. Deploy the S3 bucket:
+	terraform apply -auto-approve

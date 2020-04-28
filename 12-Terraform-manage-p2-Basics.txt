@@ -1,0 +1,940 @@
+						##### Terraform Basics #####
+###############
+#Terraform Commands#
+###############
+# Материалы:
+https://www.terraform.io/docs/commands/index.html
+
+# We will start by creating a very simple Terraform file that will pull down the an image from Docker Hub.
+
+# List the Terraform commands:
+	terraform
+	Common commands:
+		apply: Builds or changes infrastructure
+		console: Interactive console for Terraform interpolations
+		destroy: Destroys Terraform-managed infrastructure
+		fmt: Rewrites configuration files to canonical format
+		get: Downloads and installs modules for the configuration
+		graph: Creates a visual graph of Terraform resources
+		import: Imports existing infrastructure into Terraform
+		init: Initializes a new or existing Terraform configuration
+		output: Reads an output from a state file
+		plan: Generates and shows an execution plan
+		providers: Prints a tree of the providers used in the configuration
+		push: Uploads this Terraform module to Terraform Enterprise to run
+		refresh: Updates local state file against real resources
+		show: Inspects Terraform state or plan
+		taint: Manually marks a resource for recreation
+		untaint: Manually unmarks a resource as tainted
+		validate: Validates the Terraform files
+		version: Prints the Terraform version
+		workspace: Workspace management
+
+#Шаг 1. Set up the environment:
+[cloud_user@fas2c ~]$ mkdir -p terraform/basics
+[cloud_user@fas2c ~]$ cd terraform/basics
+[cloud_user@fas2c basics]$
+
+
+#Шаг 2. Create a Terraform script:
+[cloud_user@fas2c basics]$ vi main.tf
+
+# Download the latest Ghost image
+resource "docker_image" "image_id" {
+  name = "ghost:latest"
+}
+
+#Шаг 3. Initialize Terraform:
+[cloud_user@fas2c basics]$ ll
+total 4
+-rw-rw-r--. 1 cloud_user cloud_user 97 Apr 10 06:39 main.tf
+
+[cloud_user@fas2c basics]$ terraform init
+
+[cloud_user@fas2c basics]$ ls -altr
+total 4
+drwxrwxr-x. 3 cloud_user cloud_user 19 Apr 10 06:36 ..
+-rw-rw-r--. 1 cloud_user cloud_user 97 Apr 10 06:39 main.tf
+drwxrwxr-x. 3 cloud_user cloud_user 20 Apr 10 06:40 .terraform # Установились плагины, чтобы terraform мог разворачивать инфраструктуру
+drwxrwxr-x. 3 cloud_user cloud_user 37 Apr 10 06:40 .
+
+[cloud_user@fas2c basics]$ ls .terraform/
+plugins
+
+[cloud_user@fas2c basics]$ ls .terraform/plugins/
+linux_amd64
+
+[cloud_user@fas2c basics]$ ls .terraform/plugins/linux_amd64/
+lock.json  terraform-provider-docker_v2.7.0_x4
+
+#Шаг 4. Validate the Terraform file:
+[cloud_user@fas2c basics]$ terraform validate
+[cloud_user@fas2c basics]$ # Если ничего не вернулось, то все нормально
+
+#Шаг 5. List providers in the folder:
+[cloud_user@fas2c basics]$ ls .terraform/plugins/linux_amd64/
+lock.json  terraform-provider-docker_v2.7.0_x4
+
+#Шаг 6. List providers used in the configuration:
+[cloud_user@fas2c basics]$ terraform providers
+.
+└── provider.docker
+
+#Шаг 7. Terraform Plan:
+[cloud_user@fas2c basics]$ terraform plan
+Plan: 1 to add, 0 to change, 0 to destroy.
+
+Useful flags for plan:
+	-out=path: Writes a plan file to the given path. This can be used as input to the "apply" command.
+	-var 'foo=bar': Set a variable in the Terraform configuration. This flag can be set multiple times.
+
+#Шаг 8. Terraform Apply:
+[cloud_user@fas2c basics]$ terraform apply
+	
+Useful flags for apply:
+	-auto-approve: This skips interactive approval of plan before applying.
+	-var 'foo=bar': This sets a variable in the Terraform configuration. It can be set multiple times.
+
+	Confirm your apply by typing yes. The apply will take a bit to complete.
+
+#Шаг 9. List the Docker images:
+[cloud_user@fas2c basics]$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+ghost               latest              57aae2a3c8fd        10 hours ago        417MB
+
+#Шаг 10. Terraform Show (смотрим, что сейчас в Terraform state):
+[cloud_user@fas2c basics]$ terraform show
+docker_image.image_id:
+  id = sha256:57aae2a3c8fdeb1d70b8794f94c229b937893d1bf5e6ad1d674f83b9d8b3379aghost:latest
+  latest = sha256:57aae2a3c8fdeb1d70b8794f94c229b937893d1bf5e6ad1d674f83b9d8b3379a
+  name = ghost:latest
+
+#Шаг 11. Terraform Destroy:
+[cloud_user@fas2c basics]$ terraform destroy
+	Confirm your destroy by typing yes.
+
+Useful flags for destroys:
+	-auto-approve: Skip interactive approval of plan before applying.
+
+#Шаг 12. Re-list the Docker images:
+[cloud_user@fas2c basics]$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+
+#Шаг 13. Using a plan (вносим изменения через файл):
+[cloud_user@fas2c basics]$ terraform plan -out=tfplan
+
+[cloud_user@fas2c basics]$ ls
+main.tf  terraform.tfstate  terraform.tfstate.backup  tfplan # Файл нечитаемый
+
+#Шаг 14. Applying a plan:
+[cloud_user@fas2c basics]$ terraform apply tfplan # ВАЖНО, ЧТО НЕ ТРЕБУЕТ ПОДТВЕРЖДЕНИЯ - YES
+
+#Шаг 15. Show the Docker Image resource:
+[cloud_user@fas2c basics]$ terraform show
+docker_image.image_id:
+  id = sha256:57aae2a3c8fdeb1d70b8794f94c229b937893d1bf5e6ad1d674f83b9d8b3379aghost:latest
+  latest = sha256:57aae2a3c8fdeb1d70b8794f94c229b937893d1bf5e6ad1d674f83b9d8b3379a
+  name = ghost:latest
+
+#Шаг 16. Destroy the resource once again:
+[cloud_user@fas2c basics]$ terraform destroy
+
+###############
+#HashiCorp Configuration Language#
+###############
+# Материалы:
+https://www.terraform.io/docs/configuration-0-11/syntax.html
+https://www.terraform.io/docs/configuration-0-11/interpolation.html
+
+# Syntax reference:
+	Single line comments start with #.
+	Multi-line comments are wrapped with /* and */.
+	Values are assigned with the syntax of key = value.
+	Strings are in double-quotes.
+	Strings can interpolate other values using syntax wrapped in ${}, for example ${var.foo}.
+	Numbers are assumed to be base 10.
+	Boolean values: true, false
+	Lists of primitive types can be made with square brackets ([]), for example ["foo", "bar", "baz"].
+	Maps can be made with braces ({}) and colons (:), for example { "foo": "bar", "bar": "baz" }.
+	Style Conventions:
+	Indent two spaces for each nesting level.
+	With multiple arguments, align their equals signs.
+
+# Setup the environment:
+	cd terraform/basics
+	
+# Deploying a container using Terraform
+main.tf contents:
+
+# Download the latest Ghost image
+resource "docker_image" "image_id" {
+  name = "ghost:latest"
+}
+
+# Start the Container
+resource "docker_container" "container_id" {
+  name  = "ghost_blog"
+  image = "${docker_image.image_id.latest}"
+  ports {
+    internal = "2368"
+    external = "80"
+  }
+}
+
+###############
+#Tainting and Updating Resources#
+###############
+# Материалы:
+https://www.terraform.io/docs/commands/taint.html
+https://www.terraform.io/docs/commands/untaint.html
+
+ We are going to take a look at how to force a redeploy of resources using tainting. This is an extremely useful skill for when parts of a deployment need to be modified.
+
+### Пример 1 ###
+Terraform commands:
+	taint: Manually mark a resource for recreation 
+	untaint: Manually unmark a resource as tainted
+
+# Шаг 1. Set up the environment:
+[cloud_user@fas2c basics]$ cd terraform/basics
+
+# Шаг 2. Redeploy the Ghost image:
+[cloud_user@fas2c basics]$ terraform apply
+
+[cloud_user@fas2c basics]$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+ghost               latest              57aae2a3c8fd        4 days ago          417MB
+
+[cloud_user@fas2c basics]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                  NAMES
+3b4b2cc69d6a        57aae2a3c8fd        "docker-entrypoint.s…"   22 seconds ago      Up 21 seconds       0.0.0.0:80->2368/tcp   ghost_blog
+
+# Шаг 3. Taint the Ghost blog resource:
+[cloud_user@fas2c basics]$ terraform taint docker_container.container_id
+The resource docker_container.container_id in the module root has been marked as tainted!
+
+# Шаг 4. See what will be changed:
+[cloud_user@fas2c basics]$ terraform plan
+
+Terraform will perform the following actions:
+	-/+ docker_container.container_id (new resource required) # Предлагается принудительно пересоздать контейнер
+
+# Шаг 5. Remove the taint on the Ghost blog resource:
+[cloud_user@fas2c basics]$ terraform untaint docker_container.container_id
+The resource docker_container.container_id in the module root has been successfully untainted!
+
+# Шаг 6. Verity that the Ghost blog resource is untainted:
+[cloud_user@fas2c basics]$ terraform plan
+
+Terraform will perform the following actions:
+	-/+ docker_container.container_id (new resource required) # Все еще предлагается принудительно пересоздать контейнер - этот функционал не работает
+
+# Шаг 7. Reset the environment:
+[cloud_user@fas2c basics]$ terraform destroy
+
+### Пример 2 ###
+Updating Resources
+
+# Шаг 1. Set up the environment:
+[cloud_user@fas2c basics]$ cd terraform/basics
+
+# Шаг 2. Redeploy the Ghost image:
+[cloud_user@fas2c basics]$ terraform apply
+
+[cloud_user@fas2c basics]$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+ghost               latest              57aae2a3c8fd        4 days ago          417MB
+
+[cloud_user@fas2c basics]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                  NAMES
+918f895f2d4c        57aae2a3c8fd        "docker-entrypoint.s…"   32 seconds ago      Up 31 seconds       0.0.0.0:80->2368/tcp   ghost_blog
+
+# Шаг 3. Let's edit main.tf and change the image to ghost:alpine.
+[cloud_user@fas2c basics]$ vi main.tf
+# Download the latest Ghost image
+resource "docker_image" "image_id" {
+  name = "ghost:alpine" # Меняем image
+}
+
+# Start the Container
+resource "docker_container" "container_id" {
+  name  = "ghost_blog"
+  image = "${docker_image.image_id.latest}"
+  ports {
+    internal = "2368"
+    external = "80"
+  }
+}
+
+# Шаг 4. Validate changes made to main.tf:
+[cloud_user@fas2c basics]$ terraform validate
+
+# Шаг 5. See what changes will be applied:
+[cloud_user@fas2c basics]$ terraform plan
+
+Plan: 1 to add, 1 to change, 1 to destroy.
+
+# Шаг 6. Apply image changes:
+[cloud_user@fas2c basics]$ terraform apply
+
+Apply complete! Resources: 1 added, 1 changed, 1 destroyed. # resource "docker_container" работает не так как показано - всегда пересоздает контейнер
+
+# Далее ошибка!
+
+### Пример 3 ###
+# Откатываем изменения
+
+# Шаг 1. Reset the environment:
+terraform destroy
+	Confirm the destroy by typing yes.
+
+# Шаг 2. List the Docker images:
+docker image ls
+
+# Шаг 3. Remove the Ghost blog image:
+docker image rm ghost:latest
+
+# Шаг 4. Reset main.tf:
+vi main.tf
+
+main.tf contents:
+# Download the latest Ghost image
+resource "docker_image" "image_id" {
+  name = "ghost:latest"
+}
+
+# Start the Container
+resource "docker_container" "container_id" {
+  name  = "ghost_blog"
+  image = "${docker_image.image_id.latest}"
+  ports {
+    internal = "2368"
+    external = "80"
+  }
+}
+
+###############
+#Terraform Console and Output#
+###############
+# Материалы:
+https://www.terraform.io/docs/commands/console.html
+terraform.io/docs/configuration-0-11/outputs.html
+
+Terraform commands:
+console: Interactive console for Terraform interpolations
+
+# Шаг 1. Set up the environment:
+	cd terraform/basics
+
+# Шаг 2. Working with the Terraform console
+
+	Redeploy the Ghost image and container:
+		terraform apply
+
+	Show the Terraform resources:
+		terraform show
+
+[cloud_user@fas2c basics]$ terraform show
+docker_container.container_id:
+  id = 1a9c9808ba1c895c48064b2822ac5d439645f99ec32c5aa29037f8b9b2aedf65
+  env.485145669 = GHOST_VERSION=3.13.1
+  gateway = 172.17.0.1
+  group_add.# = 0
+  host.# = 0
+  hostname = 1a9c9808ba1c
+  image = sha256:57aae2a3c8fdeb1d70b8794f94c229b937893d1bf5e6ad1d674f83b9d8b3379a
+  ip_address = 172.17.0.2
+
+docker_image.image_id:
+  id = sha256:57aae2a3c8fdeb1d70b8794f94c229b937893d1bf5e6ad1d674f83b9d8b3379aghost:latest
+  latest = sha256:57aae2a3c8fdeb1d70b8794f94c229b937893d1bf5e6ad1d674f83b9d8b3379a
+  name = ghost:latest
+
+	Start the Terraform console:
+		terraform console
+
+[cloud_user@fas2c basics]$ terraform console
+>
+
+	Type the following in the console to get the container's name:
+		docker_container.container_id.name
+		
+	Type the following in the console to get the container's IP:
+		docker_container.container_id.ip_address
+		
+[cloud_user@fas2c basics]$ terraform console
+> docker_container.container_id.name
+ghost_blog
+> docker_container.container_id.ip_address
+172.17.0.2
+>
+		
+	Break out of the Terraform console by using Ctrl+C.
+
+	Destroy the environment:
+		terraform destroy
+
+# Шаг 3. Output the name and IP of the Ghost blog container
+	Edit main.tf:
+		vi main.tf
+# Download the latest Ghost Image
+resource "docker_image" "image_id" {
+  name = "ghost:latest"
+}
+
+# Start the Container
+resource "docker_container" "container_id" {
+  name  = "blog"
+  image = "${docker_image.image_id.latest}"
+  ports {
+    internal = "2368"
+    external = "80"
+  }
+}
+
+#Output the IP Address of the Container Добавляем output ресурса
+output "ip_address" {
+  value       = "${docker_container.container_id.ip_address}"
+  description = "The IP for the container."
+}
+
+#Output the Name of the Container Добавляем output ресурса
+output "container_name" {
+  value       = "${docker_container.container_id.name}"
+  description = "The name of the container."
+}
+
+	Validate changes:
+		terraform validate
+
+	Apply changes to get output:
+		terraform apply
+		
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+Outputs:
+container_name = blog
+ip_address = 172.17.0.2
+
+# Шаг 4. Cleaning up the environment
+	Reset the environment:
+		terraform destroy
+		
+###############
+#Input Variables#
+###############
+# Материалы:
+# https://www.terraform.io/docs/configuration-0-11/variables.html
+
+# Each block declares a single variable. Syntax:
+variable [NAME] {
+  [OPTION] = "[VALUE]"
+}
+
+# Within the block body (between { }) is configuration for the variable, which accepts the following arguments:
+	type (Optional): If set, this defines the type of the variable. Valid values are string, list, and map.
+	default (Optional): This sets a default value for the variable. If no default is provided, Terraform will raise an error if a value is not provided by the caller.
+	description (Optional): A human-friendly description for the variable.
+	
+#Using variables during an apply:
+	terraform apply -var 'foo=bar'
+
+# Шаг 1. Set up the environment:
+	cd terraform/basics
+
+# Шаг 2. Edit main.tf:
+	vi main.tf
+
+#Define variables
+variable "image_name" {
+  description = "Image for container."
+  default     = "ghost:latest"
+}
+
+variable "container_name" {
+  description = "Name of the container."
+  default     = "blog"
+}
+
+variable "int_port" {
+  description = "Internal port for container."
+  default     = "2368"
+}
+
+variable "ext_port" {
+  description = "External port for container."
+  default     = "80"
+}
+
+# Download the latest Ghost Image
+resource "docker_image" "image_id" {
+  name = "${var.image_name}"
+}
+
+# Start the Container
+resource "docker_container" "container_id" {
+  name  = "${var.container_name}"
+  image = "${docker_image.image_id.latest}"
+  ports {
+    internal = "${var.int_port}"
+    external = "${var.ext_port}"
+  }
+}
+
+#Output the IP Address of the Container
+output "ip_address" {
+  value       = "${docker_container.container_id.ip_address}"
+  description = "The IP for the container."
+}
+
+output "container_name" {
+  value       = "${docker_container.container_id.name}"
+  description = "The name of the container."
+}
+
+# Шаг 3. Validate the changes:
+	terraform validate #  Если в переменной не задано значение по умолчанию, то будет ошибка Error: Required variable not set: ext_port
+
+# Шаг 4. Plan the changes:
+	terraform plan
+
+# Шаг 5. Apply the changes using a variable:
+	terraform apply -var 'ext_port=8080' # Изменим значиние по умолчанию с 80 на 8080
+
+[cloud_user@fas2c basics]$ terraform console
+> docker_container.container_id.name
+blog
+
+# Шаг 6. Change the container name:
+	terraform apply -var 'container_name=ghost_blog' -var 'ext_port=8080'
+	
+name:             "blog" => "ghost_blog" (forces new resource)
+
+Apply complete! Resources: 1 added, 0 changed, 1 destroyed. # Контейнер пересоздался
+Outputs:
+container_name = ghost_blog
+ip_address = 172.17.0.2
+
+# Шаг 7. Reset the environment:
+	terraform destroy -var 'ext_port=8080'
+
+# Если какая-то переменная не имеет значения по умолчанию, то ее значение нужно будет вводить:
+[cloud_user@fas2c basics]$ terraform destroy
+var.ext_port
+  External port for container.
+
+  Enter a value:
+
+#или использовать terraform destroy -var 'ext_port=8080'
+
+###############
+#Breaking Out Our Variables and Outputs#
+###############
+# Шаг 1. Setup your environment:
+	cd terraform/basics
+
+---------------
+# Шаг 2. Edit variables.tf:
+	vi variables.tf
+
+#Define variables
+variable "container_name" {
+  description = "Name of the container."
+  default     = "blog"
+}
+variable "image_name" {
+  description = "Image for container."
+  default     = "ghost:latest"
+}
+variable "int_port" {
+  description = "Internal port for container."
+  default     = "2368"
+}
+variable "ext_port" {
+  description = "External port for container."
+  default     = "80"
+}
+
+---------------
+# Шаг 3. Edit main.tf:
+	vi main.tf
+
+# Download the latest Ghost Image
+resource "docker_image" "image_id" {
+  name = "${var.image_name}"
+}
+
+# Start the Container
+resource "docker_container" "container_id" {
+  name  = "${var.container_name}"
+  image = "${docker_image.image_id.latest}"
+  ports {
+    internal = "${var.int_port}"
+    external = "${var.ext_port}"
+  }
+}
+
+---------------
+# Шаг 4. Edit outputs.tf:
+	vi outputs.tf
+
+#Output the IP Address of the Container
+output "ip_address" {
+  value       = "${docker_container.container_id.ip_address}"
+  description = "The IP for the container."
+}
+
+output "container_name" {
+  value       = "${docker_container.container_id.name}"
+  description = "The name of the container."
+}
+
+---------------
+# Шаг 5. Validate the changes:
+	terraform validate
+
+# Шаг 6. Plan the changes:
+	terraform plan -out=tfplan -var container_name=ghost_blog
+
+# Шаг 7. Apply the changes:
+	terraform apply tfplan
+	
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+Outputs:
+container_name = ghost_blog
+container_shm_size = 64 # Смотрим в plan и добавляем переменные, которые там показаны при создании ресурса
+ip_address = 172.17.0.2
+
+
+# Шаг 8. Destroy deployment:	
+	terraform destroy -auto-approve -var container_name=ghost_blog # Ключ -auto-approve - это автоматическое подтверждение
+	
+###############
+#Maps and Lookups#
+###############
+# Map to specify different environment variables based on conditions. This will allow us to dynamically deploy infrastructure configurations based on information we pass to the deployment.
+
+# (1) В variables.tf объявляется переменная (к примеру, env)
+# (2) В variables.tf нужные переменные задаются типом  type = "map" и им задаются значения на выбор default = { dev  = "ghost:latest" | prod = "ghost:alpine" }
+# (3) В main.tf в ресурсе применяется конструкция, связывающая (1) и (2): name = "${lookup(var.image_name, var.env)}"
+
+##### Часть 1 #####
+
+# Шаг 1. Set up the environment:
+	cd terraform/basics
+
+# Шаг 2. Edit variables.tf:
+	vi variables.tf
+
+#Define variables
+variable "env" {
+  description = "env: dev or prod"
+}
+variable "image_name" {
+  type        = "map"
+  description = "Image for container."
+  default     = {
+    dev  = "ghost:latest"
+    prod = "ghost:alpine"
+  }
+}
+
+variable "container_name" {
+  type        = "map"
+  description = "Name of the container."
+  default     = {
+    dev  = "blog_dev"
+    prod = "blog_prod"
+  }
+}
+
+variable "int_port" {
+  description = "Internal port for container."
+  default     = "2368"
+}
+variable "ext_port" {
+  type        = "map"
+  description = "External port for container."
+  default     = {
+    dev  = "8081"
+    prod = "80"
+  }
+}
+
+# Шаг 3. Validate the change:
+	terraform validate
+
+# Шаг 4. Edit main.tf:
+	vi main.tf
+
+# Download the latest Ghost Image
+resource "docker_image" "image_id" {
+  name = "${lookup(var.image_name, var.env)}"
+}
+
+# Start the Container
+resource "docker_container" "container_id" {
+  name  = "${lookup(var.container_name, var.env)}"
+  image = "${docker_image.image_id.latest}"
+  ports {
+    internal = "${var.int_port}"
+    external = "${lookup(var.ext_port, var.env)}"
+  }
+}
+
+# Шаг 5. Plan the dev deploy:
+	terraform plan -out=tfdev_plan -var env=dev
+	
+[cloud_user@fas2c basics]$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+ghost               latest              57aae2a3c8fd        5 days ago          417MB
+[cloud_user@fas2c basics]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                    NAMES
+1fb6d6a6d8b3        57aae2a3c8fd        "docker-entrypoint.s…"   2 minutes ago       Up 2 minutes        0.0.0.0:8081->2368/tcp   blog_dev
+
+# Создались объекты для dev окружения
+
+# Шаг 6. Apply the dev plan:
+	terraform apply tfdev_plan
+
+# Шаг 7. Plan the prod deploy:
+	terraform plan -out=tfprod_plan -var env=prod
+
+# Шаг 8. Apply the prod plan:
+	terraform apply tfprod_plan
+	
+Apply complete! Resources: 1 added, 1 changed, 1 destroyed.
+
+Outputs:
+container_name = blog_prod
+container_shm_size = 64
+ip_address = 172.17.0.2
+
+[cloud_user@fas2c basics]$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+ghost               alpine              8770967d98fc        5 days ago          352MB
+ghost               latest              57aae2a3c8fd        5 days ago          417MB
+[cloud_user@fas2c basics]$ docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                  NAMES
+78af408da396        8770967d98fc        "docker-entrypoint.s…"   25 seconds ago      Up 23 seconds       0.0.0.0:80->2368/tcp   blog_prod
+
+# Добавился новый image (1 changed), но старый image остался, добавился новый контейнер для prod (1 added), a старый контейнер для dev удалился (1 destroyed)
+
+# Шаг 9. Destroy prod deployment:
+	terraform destroy -var env=prod -auto-approve
+	
+[cloud_user@fas2c basics]$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+ghost               latest              57aae2a3c8fd        5 days ago          417MB # Image от dev остался, так как он уже не управляется Terraform
+
+[cloud_user@fas2c basics]$ terraform destroy -var env=dev -auto-approve
+Destroy complete! Resources: 0 destroyed.
+
+[cloud_user@fas2c basics]$ docker image rm 57aae2a3c8fd # Удаляем вручную
+
+##### Часть 2 #####
+# TF_VAR_* - переменные окружения для Terraform
+
+# Шаг 10. Use environment variables:
+	export TF_VAR_env=prod
+
+# Шаг . Open the Terraform console:
+	terraform console
+
+# Шаг 11. Execute a lookup:
+	lookup(var.ext_port, var.env)
+	
+[cloud_user@fas2c basics]$ export TF_VAR_env=prod
+[cloud_user@fas2c basics]$ terraform console
+> lookup(var.ext_port, var.env)
+80
+> exit
+[cloud_user@fas2c basics]$ export TF_VAR_env=dev
+[cloud_user@fas2c basics]$ terraform console
+> lookup(var.ext_port, var.env)
+8081
+> exit
+
+[cloud_user@fas2c basics]$ terraform plan # Переменная уже объявлена, тут объявлять не нужно
+ name:             "blog_dev"
+      network_data.#:   <computed>
+      ports.#:          "1"
+      ports.0.external: "8081"
+      ports.0.internal: "2368"
+
+[cloud_user@fas2c basics]$ env
+TF_VAR_env=dev # наша переменная
+OLDPWD=/home/cloud_user/terraform
+
+# Шаг 12. Exit the console:
+	unset TF_VAR_env
+	
+###############
+#Terraform Workspaces#
+###############
+# We will see how workspaces can help us deploy multiple environments. By using workspaces, we can deploy multiple environments simultaneously without the state files colliding.
+
+Terraform commands:
+	workspace: New, list, select and delete Terraform workspaces
+
+Workspace subcommands:
+	delete: Delete a workspace 
+	list: List Workspaces 
+	new: Create a new workspace 
+	select: Select a workspace 
+	show: Show the name of the current workspace
+
+# Шаг 1. Setup the environment:
+	cd terraform/basics
+
+# Шаг 2. Create a dev workspace:
+	terraform workspace new dev
+	
+[cloud_user@fas2c basics]$ terraform workspace list
+* default
+
+[cloud_user@fas2c basics]$ terraform workspace show
+default
+[cloud_user@fas2c basics]$ terraform workspace new dev
+Created and switched to workspace "dev"!
+
+[cloud_user@fas2c basics]$ terraform workspace list
+  default
+* dev
+
+[cloud_user@fas2c basics]$ ls
+main.tf  outputs.tf  terraform.tfstate  terraform.tfstate.backup  terraform.tfstate.d  tfdev_plan  tfplan  tfprod_plan  variables.tf
+[cloud_user@fas2c basics]$ ls terraform.tfstate.d/ # Для окружения создалась новая папка, куда запишется tfstate-файл
+dev
+[cloud_user@fas2c basics]$ ls terraform.tfstate.d/dev/
+[cloud_user@fas2c basics]$
+
+# Шаг 3. Plan the dev deployment:
+	terraform plan -out=tfdev_plan -var env=dev
+
+# Шаг 4. Apply the dev deployment:
+	terraform apply tfdev_plan
+	
+[cloud_user@fas2c basics]$ terraform apply tfdev_plan
+[cloud_user@fas2c basics]$ ls terraform.tfstate.d/dev/
+terraform.tfstate
+
+# Шаг 5. Change workspaces:
+	terraform workspace new prod
+
+# Шаг 6. Plan the prod deployment:
+	terraform plan -out=tfprod_plan -var env=prod
+
+# Шаг 7. Apply the prod deployment:
+	terraform apply tfprod_plan
+
+[cloud_user@fas2c basics]$ terraform apply tfprod_plan
+[cloud_user@fas2c basics]$ ls terraform.tfstate.d/prod/
+terraform.tfstate
+
+[cloud_user@fas2c basics]$ docker image ls
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+ghost               alpine              8770967d98fc        5 days ago          352MB
+ghost               latest              57aae2a3c8fd        5 days ago          417MB
+[cloud_user@fas2c basics]$ docker container ls
+CONTAINER ID        IMAGE               COMMAND                  CREATED              STATUS              PORTS                    NAMES
+8f87c0809418        8770967d98fc        "docker-entrypoint.s…"   About a minute ago   Up About a minute   0.0.0.0:80->2368/tcp     blog_prod
+4b4aec32c69f        57aae2a3c8fd        "docker-entrypoint.s…"   3 minutes ago        Up 3 minutes        0.0.0.0:8081->2368/tcp   blog_dev
+
+# Контейнер для prod не удалил контейнер для dev, так как они в разных workspaces
+
+# Шаг 8. Select the default workspace:
+	terraform workspace select default
+
+# Шаг 9. Find what workspace we are using:
+	terraform workspace show
+	
+[cloud_user@fas2c basics]$ terraform workspace select default
+Switched to workspace "default".
+[cloud_user@fas2c basics]$ terraform workspace show
+default
+[cloud_user@fas2c basics]$ terraform workspace list
+* default
+  dev
+  prod
+
+# Шаг 10. Select the dev workspace:
+	terraform workspace select dev
+
+# Шаг 11. Destroy the dev deployment:
+	terraform destroy -var env=dev
+
+# Шаг 12. Select the prod workspace:
+	terraform workspace select prod
+
+# Шаг 13. Destroy the prod deployment:
+	terraform destroy -var env=prod
+	
+# Шаг 14. Select the default workspace:
+	terraform workspace select default
+
+###############
+#Null Resources and Local-exec#
+###############
+# We will utilize a Null Resource in order to perform local commands on our machine without having to deploy extra resources.
+
+# The null_resource resource implements the standard resource lifecycle but takes no further action.
+# If you need to run provisioners that aren't directly associated with a specific resource, you can associate them with a null_resource.
+
+# The local-exec provisioner invokes a local executable after a resource is created. This invokes a process on the machine running Terraform, not on the resource.
+
+# Шаг 1. Setup the environment:
+	cd terraform/basics
+
+# Шаг 2. main.tf contents:
+
+# Download the latest Ghost Image
+resource "docker_image" "image_id" {
+  name = "${lookup(var.image_name, var.env)}"
+}
+
+# Start the Container
+resource "docker_container" "container_id" {
+  name  = "${lookup(var.container_name, var.env)}"
+  image = "${docker_image.image_id.latest}"
+  ports {
+    internal = "${var.int_port}"
+    external = "${lookup(var.ext_port, var.env)}"
+  }
+}
+
+resource "null_resource" "null_id" {
+  provisioner "local-exec" {
+    command = "echo ${docker_container.container_id.name}:${docker_container.container_id.ip_address} >> container.txt"
+  }
+}
+
+# Шаг 3. Reinitialize Terraform:
+	terraform init
+	
+[cloud_user@fas2c basics]$ ls -altr .terraform/plugins/linux_amd64/
+total 44000
+drwxrwxr-x. 3 cloud_user cloud_user       24 Apr 10 06:40 ..
+-rwxr-xr-x. 1 cloud_user cloud_user 24674304 Apr 10 06:40 terraform-provider-docker_v2.7.0_x4
+drwxrwxr-x. 2 cloud_user cloud_user      104 Apr 16 05:19 .
+-rwxr-xr-x. 1 cloud_user cloud_user 20373856 Apr 16 05:19 terraform-provider-null_v2.1.2_x4 # новый провайдер для null_resource
+-rwxrwxr-x. 1 cloud_user cloud_user      160 Apr 16 05:19 lock.json
+
+
+# Шаг 4. Validate the changes:
+	terraform validate
+
+# Шаг 5. Plan the changes:
+	terraform plan -out=tfplan -var env=dev
+
+# Шаг 6. Apply the changes:
+	terraform apply tfplan
+
+# Шаг 7. View the contents of container.txt:
+	cat container.txt
+	
+[cloud_user@fas2c basics]$ cat container.txt
+blog_dev:172.17.0.2
+
+
+# Шаг 8. Destroy the deployment:
+	terraform destroy -auto-approve -var env=dev
